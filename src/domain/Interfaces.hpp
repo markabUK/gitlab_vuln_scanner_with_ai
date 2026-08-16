@@ -1,0 +1,70 @@
+#pragma once
+
+#include "Models.hpp"
+#include <memory>
+#include <optional>
+#include <vector>
+
+// ==========================================
+// 1. Gradle Parser Interface
+// ==========================================
+class IGradleParser {
+public:
+    virtual ~IGradleParser() = default;
+    virtual std::vector<Dependency> ParseDependencies(const std::string& gradleContent) = 0;
+    virtual std::string UpdateDependencyVersion(
+        const std::string& gradleContent, 
+        const Dependency& oldDep, 
+        const Dependency& newDep
+    ) = 0;
+};
+
+// ==========================================
+// 2. Maven Registry Interface (Central / GitLab Private)
+// ==========================================
+class IMavenRegistry {
+public:
+    virtual ~IMavenRegistry() = default;
+    virtual std::optional<std::string> GetLatestVersion(const Dependency& oldDep) = 0;
+    virtual DependencyChange InspectVersionDiff(const Dependency& oldDep, const Dependency& newDep) = 0;
+};
+
+// ==========================================
+// 3. Pluggable AI Assistant Interface (Vendor-Agnostic)
+// ==========================================
+class IAICodeAssistant {
+public:
+    virtual ~IAICodeAssistant() = default;
+
+    virtual std::string GetProviderName() const = 0;
+    virtual std::string RefactorCode(const RefactorRequest& request) = 0;
+    virtual std::string GenerateMergeRequestDescription(
+        const std::vector<DependencyChange>& appliedChanges
+    ) = 0;
+};
+
+// ==========================================
+// 4. GitLab Client Interfaces (Repository & MR Management)
+// ==========================================
+class IGitLabClient {
+public:
+    virtual ~IGitLabClient() = default;
+    virtual std::vector<ProjectContext> GetProjectsInGroup(const std::string& groupId) = 0;
+    virtual std::string FetchFileContent(const std::string& projectId, const std::string& filePath, const std::string& ref) = 0;
+    virtual std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref) = 0;
+    virtual void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) = 0;
+    virtual void CommitFile(
+        const std::string& projectId, 
+        const std::string& branch, 
+        const std::string& filePath, 
+        const std::string& content, 
+        const std::string& commitMessage
+    ) = 0;
+    virtual std::string CreateMergeRequest(
+        const std::string& projectId, 
+        const std::string& sourceBranch, 
+        const std::string& targetBranch, 
+        const std::string& title, 
+        const std::string& description
+    ) = 0;
+};
