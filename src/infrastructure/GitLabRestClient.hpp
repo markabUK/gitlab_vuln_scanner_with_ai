@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <algorithm>
+#include <stdexcept> // For std::runtime_error
 
 using json = nlohmann::json;
 
@@ -32,8 +33,9 @@ public:
         std::cout << "Fetching all projects in group " << groupId << " (including subgroups)...\n";
 
         while (hasMore) {
+            // CRITICAL FIX: added &archived=false to prevent querying dead/locked projects
             std::string url = baseUrl + "/api/v4/groups/" + groupId +
-                              "/projects?include_subgroups=true&per_page=100&page=" + std::to_string(page);
+                              "/projects?include_subgroups=true&archived=false&per_page=100&page=" + std::to_string(page);
 
             auto response = HttpClient::Get(url, GetAuthHeaders());
             if (response.statusCode != 200) {
@@ -70,7 +72,7 @@ public:
 
         auto response = HttpClient::Get(url, GetAuthHeaders());
         if (response.statusCode != 200) {
-            std::cerr << "Failed to fetch file: " << filePath << " (Status " << response.statusCode << ")\n";
+            // It's okay if this fails (e.g. 404), we just return empty string and the orchestrator handles it
             return "";
         }
         return response.body;
@@ -80,9 +82,12 @@ public:
         std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/branches";
         json payload = {{"branch", newBranch}, {"ref", refBranch}};
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
-        if (response.statusCode != 200 && response.statusCode != 201)
-            std::cerr << "[ERROR] Failed to create branch '" << newBranch
-                      << "' (Status " << response.statusCode << "): " << response.body << "\n";
+        
+        // CRITICAL FIX: Throw on 403 Forbidden or other errors so the Orchestrator can cleanly skip this project
+        if (response.statusCode != 200 && response.statusCode != 201) {
+            throw std::runtime_error("Failed to create branch '" + newBranch + 
+                                     "' (Status " + std::to_string(response.statusCode) + "): " + response.body);
+        }
     }
 
     void CommitFile(const std::string& projectId, const std::string& branch, const std::string& filePath,
@@ -98,9 +103,12 @@ public:
             }}}
         };
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
-        if (response.statusCode != 200 && response.statusCode != 201)
-            std::cerr << "[ERROR] Failed to commit file '" << filePath
-                      << "' (Status " << response.statusCode << "): " << response.body << "\n";
+        
+        // CRITICAL FIX: Throw exception on failure
+        if (response.statusCode != 200 && response.statusCode != 201) {
+            throw std::runtime_error("Failed to commit file '" + filePath + 
+                                     "' (Status " + std::to_string(response.statusCode) + "): " + response.body);
+        }
     }
 
     std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref) override {
@@ -122,8 +130,9 @@ public:
             for (const auto& item : jsonArray) {
                 if (item["type"].get<std::string>() == "blob") {
                     std::string path = item["path"].get<std::string>();
-                    if (path.ends_with(".java") || path.ends_with(".kt")   || path.ends_with(".kts") ||
-                        path.ends_with(".xml")  || path.ends_with(".yaml") || path.ends_with(".yml")) {
+                    
+                    // STRICT FILTERING: Only target core source code files.
+                    if (path.ends_with(".java") || path.ends_with(".kt") || path.ends_with(".kts")) {
                         sourceFiles.push_back(path);
                     }
                 }
@@ -144,10 +153,54 @@ public:
             {"description", description}
         };
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
+        
         if (response.statusCode == 201) {
             auto jsonResp = json::parse(response.body);
             return jsonResp["web_url"].get<std::string>();
         }
-        return "";
+        
+        // CRITICAL FIX: Throw exception on failure
+        throw std::runtime_error("Failed to create Merge Request (Status " + 
+                                 std::to_string(response.statusCode) + "): " + response.body);
+    }
+
+    std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) override {
+        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests?state=opened";
+        
+        auto response = HttpClient::Get(url, GetAuthHeaders());
+        
+        std::vector<MergeRequest> mrs;
+        if (response.statusCode == 200) {
+            auto jsonArray = json::parse(response.body);
+            for (const auto& item : jsonArray) {
+                MergeRequest mr;
+                mr.iid = std::to_string(item["iid"].get<int>());
+                mr.title = item["title"].get<std::string>();
+                mr.sourceBranch = item["source_branch"].get<std::string>();
+                mr.createdAt = item["created_at"].get<std::string>();
+                
+                mrs.push_back(mr);
+            }
+        }
+        return mrs;
+    }
+
+    void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) override {
+        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests/" + mrIid;
+        json payload = {{"state_event", "close"}};
+        
+        HttpClient::Put(url, payload.dump(), GetAuthHeaders());
+    }
+
+    void DeleteBranch(const std::string& projectId, const std::string& branchName) override {
+        std::string encodedBranch;
+        for (char c : branchName) {
+            if (c == '/') encodedBranch += "%2F";
+            else encodedBranch += c;
+        }
+
+        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/branches/" + encodedBranch;
+        
+        HttpClient::Delete(url, GetAuthHeaders());
     }
 };

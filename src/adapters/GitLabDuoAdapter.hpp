@@ -4,6 +4,7 @@
 #include "../infrastructure/HttpClient.hpp"
 #include <nlohmann/json.hpp>
 #include <iostream>
+#include <string>
 
 using json = nlohmann::json;
 
@@ -11,19 +12,40 @@ class GitLabDuoAdapter : public IAICodeAssistant {
 private:
     std::string gitlabHost;
     std::string gitlabToken;
-    std::string projectPath; // optional, e.g. "group/project"
+    std::string projectPath;
 
-    // Safety net: strip markdown fences if the model includes them despite instructions.
+    struct CommentSyntax {
+        std::string prefix;
+        std::string suffix;
+    };
+
+    // Dynamically apply the correct comment syntax to prevent the AI 
+    // from hallucinating the wrong programming language.
+    CommentSyntax GetCommentSyntax(const std::string& filePath) {
+        if (filePath.ends_with(".xml") || filePath.ends_with(".html")) {
+            return {"<!-- ", " -->"};
+        }
+        if (filePath.ends_with(".yml") || filePath.ends_with(".yaml") || 
+            filePath.ends_with(".properties") || filePath.ends_with(".sh") || 
+            filePath.ends_with(".py")) {
+            return {"# ", ""};
+        }
+        // Default for Java, Kotlin, C++, Gradle, etc.
+        return {"// ", ""};
+    }
+
     std::string CleanMarkdownCodeBlocks(std::string text) {
         size_t startTick = text.find("```");
         if (startTick != std::string::npos) {
             size_t endOfLine = text.find('\n', startTick);
-            if (endOfLine != std::string::npos)
+            if (endOfLine != std::string::npos) {
                 text.erase(startTick, (endOfLine - startTick) + 1);
+            }
         }
         size_t endTick = text.rfind("```");
-        if (endTick != std::string::npos)
+        if (endTick != std::string::npos) {
             text.erase(endTick, 3);
+        }
         return text;
     }
 
@@ -34,21 +56,26 @@ public:
     std::string GetProviderName() const override { return "GitLab Duo"; }
 
     std::string RefactorCode(const RefactorRequest& request) override {
-        // intent:"completion" uses a synchronous text model (e.g. Codestral) that populates
-        // choices[0].text. intent:"generation" invokes the async Code Generations Agent which
-        // returns choices:[] empty. Embed the instruction as a comment above the code so the
-        // completion model sees it as context — user_instruction is not supported here.
+        CommentSyntax cs = GetCommentSyntax(request.filePath);
+
+        // Build a prompt that uses the correct comment syntax for the file type
         std::string contentAbove =
-            "/* REFACTOR TASK\n"
-            " * Dependency updated:\n"
-            " *   From: " + request.changeDetails.oldDep.group + ":" + request.changeDetails.oldDep.name +
-            " (" + request.changeDetails.oldDep.version + ")\n"
-            " *   To:   " + request.changeDetails.newDep.group + ":" + request.changeDetails.newDep.name +
-            " (" + request.changeDetails.newDep.version + ")\n"
-            " *   Notes: " + request.changeDetails.releaseNotes + "\n"
-            " * Output ONLY the complete refactored file. No explanations, no markdown.\n"
-            " */\n\n"
-            + request.originalCode;
+            cs.prefix + "=====================================================================" + cs.suffix + "\n" +
+            cs.prefix + "TASK: REFACTOR ENTIRE FILE FOR DEPENDENCY UPDATE" + cs.suffix + "\n" +
+            cs.prefix + "Dependency updated:" + cs.suffix + "\n" +
+            cs.prefix + "From: " + request.changeDetails.oldDep.group + ":" + request.changeDetails.oldDep.name +
+            " (" + request.changeDetails.oldDep.version + ")" + cs.suffix + "\n" +
+            cs.prefix + "To: " + request.changeDetails.newDep.group + ":" + request.changeDetails.newDep.name +
+            " (" + request.changeDetails.newDep.version + ")" + cs.suffix + "\n" +
+            cs.prefix + "Notes: " + request.changeDetails.releaseNotes + cs.suffix + "\n" +
+            cs.prefix + "CRITICAL INSTRUCTIONS:" + cs.suffix + "\n" +
+            cs.prefix + "1. Output the ENTIRE completely refactored file. Do not stop early." + cs.suffix + "\n" +
+            cs.prefix + "2. DO NOT use placeholders. Output raw code only." + cs.suffix + "\n" +
+            cs.prefix + "=====================================================================" + cs.suffix + "\n" +
+            cs.prefix + "--- ORIGINAL CODE START ---" + cs.suffix + "\n\n" +
+            request.originalCode + "\n\n" +
+            cs.prefix + "--- ORIGINAL CODE END ---" + cs.suffix + "\n" +
+            cs.prefix + "--- REFACTORED CODE START ---" + cs.suffix + "\n";
 
         json payload = {
             {"current_file", {
@@ -57,10 +84,13 @@ public:
                 {"content_below_cursor", ""}
             }},
             {"intent", "completion"},
-            {"stream", false}
+            {"stream", false},
+            {"max_new_tokens", 4096} // Attempt to force maximum output length to prevent truncation
         };
-        if (!projectPath.empty())
+        
+        if (!projectPath.empty()) {
             payload["project_path"] = projectPath;
+        }
 
         std::map<std::string, std::string> headers = {
             {"Authorization", "Bearer " + gitlabToken},
@@ -68,7 +98,7 @@ public:
         };
 
         auto response = HttpClient::Post(gitlabHost + "/api/v4/code_suggestions/completions",
-                                         payload.dump(), headers);
+            payload.dump(), headers);
 
         if (response.statusCode != 200) {
             std::cerr << "[AI ERROR] GitLab Duo API failed with status " << response.statusCode
@@ -80,9 +110,7 @@ public:
             auto jsonResp = json::parse(response.body);
 
             if (jsonResp["choices"].empty()) {
-                // Empty choices means the model found nothing to change — this is normal
-                // for minor version bumps with no breaking API changes.
-                std::cout << "  [DUO] No code changes needed for " << request.filePath << "\n";
+                std::cout << " [DUO] No code changes needed for " << request.filePath << "\n";
                 return request.originalCode;
             }
 
@@ -98,9 +126,10 @@ public:
     std::string GenerateMergeRequestDescription(const std::vector<DependencyChange>& changes) override {
         std::string desc = "## Dependency Updates\n\nAutomated dependency updates with "
                            "AI-assisted code refactoring via GitLab Duo.\n\n### Changes\n";
-        for (const auto& change : changes)
+        for (const auto& change : changes) {
             desc += "- **" + change.oldDep.group + ":" + change.oldDep.name + "** `" +
                     change.oldDep.version + "` → `" + change.newDep.version + "`\n";
+        }
         return desc;
     }
 };

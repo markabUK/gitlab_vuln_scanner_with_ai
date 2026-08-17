@@ -17,6 +17,7 @@ struct DependencyChange {
     std::string oldPackageName;
     std::string newPackageName;
     std::string releaseNotes;
+    bool skipAI{false};
 };
 
 struct RefactorRequest {
@@ -32,4 +33,11 @@ struct ProjectContext {
     std::string defaultBranch;
     std::string rawBuildGradle;
     std::vector<std::string> sourceFiles; // Paths to Java/Kotlin source files
+};
+
+struct MergeRequest {
+    std::string iid;
+    std::string title;
+    std::string sourceBranch;
+    std::string createdAt; // ISO8601 format (e.g., 2026-08-17T15:23:45Z)
 };

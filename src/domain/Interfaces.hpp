@@ -53,6 +53,9 @@ public:
     virtual std::string FetchFileContent(const std::string& projectId, const std::string& filePath, const std::string& ref) = 0;
     virtual std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref) = 0;
     virtual void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) = 0;
+    virtual std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) = 0;
+    virtual void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) = 0;
+    virtual void DeleteBranch(const std::string& projectId, const std::string& branchName) = 0;
     virtual void CommitFile(
         const std::string& projectId, 
         const std::string& branch, 
