@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <ctime>
+#include <set>
 
 class DependencyUpdateOrchestrator {
 private:
@@ -16,7 +17,7 @@ private:
     std::shared_ptr<IMavenRegistry> maven;
     std::shared_ptr<IAICodeAssistant> ai;
     std::shared_ptr<IGradleParser> parser;
-    std::vector<DependencyMigration> migrations; // Store dynamic config
+    std::vector<DependencyMigration> migrations;
     bool debugMode;
 
     std::string ReplaceAll(std::string str, const std::string& from, const std::string& to) {
@@ -39,9 +40,7 @@ private:
             }
         }
         
-        if (code.length() < (baseCode.length() * 0.5)) {
-            return baseCode; 
-        }
+        if (code.length() < (baseCode.length() * 0.5)) return baseCode; 
         return code;
     }
 
@@ -49,11 +48,8 @@ private:
     std::string PostProcessCode(std::string code, const std::vector<DependencyChange>& changes) {
         for (const auto& change : changes) {
             for (const auto& migration : migrations) {
-                // If the group matches (and optionally the artifact matches)
                 if (change.oldDep.group == migration.oldGroup && 
                    (migration.oldName.empty() || change.oldDep.name == migration.oldName)) {
-                    
-                    // Apply all search/replace rules from appsettings.json
                     for (const auto& rep : migration.replacements) {
                         code = ReplaceAll(code, rep.search, rep.replace);
                     }
@@ -66,13 +62,10 @@ private:
     bool FileImportsDependency(const std::string& code, const DependencyChange& change) {
         if (code.find(change.oldDep.group) != std::string::npos) return true;
         if (code.find(change.oldDep.name) != std::string::npos) return true;
-        
-        // Broad ecosystem overrides
         if (change.oldDep.group == "junit" && code.find("org.junit") != std::string::npos) return true;
         if (change.oldDep.name == "guava" && code.find("com.google.common") != std::string::npos) return true;
         if (change.oldDep.name == "jackson-databind" && code.find("com.fasterxml.jackson") != std::string::npos) return true;
         if (change.oldDep.name == "joda-time" && code.find("org.joda.time") != std::string::npos) return true;
-        
         return false;
     }
 
@@ -102,7 +95,7 @@ private:
     std::string BuildMergeRequestDescription(
         const std::vector<DependencyChange>& changes,
         const std::vector<std::string>& modifiedFiles,
-        const std::string& buildFilePath) {
+        const std::vector<std::string>& modifiedBuildFiles) {
         
         std::ostringstream ss;
         ss << "## 🤖 Automated Dependency & Code Update\n\n";
@@ -117,28 +110,24 @@ private:
                << "| `" << change.oldDep.version << "` "
                << "| `" << change.newDep.version << "` "
                << "| ";
+            if (change.skipAI) ss << "🔒 *Internal GitLab Registry*";
+            else if (change.hasPackageMove) ss << "⚠️ *Relocated to `" << change.newDep.group << ":" << change.newDep.name << "`*";
+            else ss << "✅ *Maven Central*";
 
-            if (change.skipAI) {
-                ss << "🔒 *Internal GitLab Registry (AI Skipped)*";
-            } else if (change.hasPackageMove) {
-                ss << "⚠️ *Relocated to `" << change.newDep.group << ":" << change.newDep.name << "`*";
-            } else {
-                ss << "✅ *Maven Central*";
-            }
-
-            if (!change.releaseNotes.empty() && !change.skipAI) {
-                ss << " — " << change.releaseNotes;
-            }
+            if (!change.releaseNotes.empty() && !change.skipAI) ss << " — " << change.releaseNotes;
             ss << " |\n";
         }
         ss << "\n";
 
-        ss << "### 📄 Build Configuration\n\n";
-        ss << "- [x] `" << buildFilePath << "` (Dependency versions bumped)\n\n";
+        ss << "### 📄 Build Configurations Updated\n\n";
+        for (const auto& file : modifiedBuildFiles) {
+            ss << "- [x] `" << file << "`\n";
+        }
+        ss << "\n";
 
         ss << "### 🛠️ Refactored Source Files (" << modifiedFiles.size() << ")\n\n";
         if (modifiedFiles.empty()) {
-            ss << "_No Java/Kotlin source files required code modifications. All upgraded dependencies are backwards compatible._\n\n";
+            ss << "_No Java/Kotlin source files required code modifications._\n\n";
         } else {
             ss << "The following source files were automatically refactored for API compatibility:\n\n";
             for (const auto& file : modifiedFiles) {
@@ -147,14 +136,22 @@ private:
             ss << "\n";
         }
 
-        ss << "---\n";
-        ss << "### 🔍 Reviewer Checklist\n";
-        ss << "- [ ] Verify test suite passes (`./gradlew test` / `./gradlew check`)\n";
-        ss << "- [ ] Review refactored import statements and API calls\n";
-        ss << "- [ ] Confirm internal snapshot or release version numbers\n\n";
-        ss << "*Automated update powered by GradleDependencyUpdater.* 🚀\n";
-
         return ss.str();
+    }
+
+    // Helper to deduplicate changes (since submodules might update the same library)
+    void DeduplicateChanges(std::vector<DependencyChange>& changes) {
+        std::vector<DependencyChange> uniqueChanges;
+        std::set<std::string> seenKeys;
+        
+        for (const auto& change : changes) {
+            std::string key = change.oldDep.group + ":" + change.oldDep.name;
+            if (seenKeys.find(key) == seenKeys.end()) {
+                seenKeys.insert(key);
+                uniqueChanges.push_back(change);
+            }
+        }
+        changes = uniqueChanges;
     }
 
 public:
@@ -163,15 +160,13 @@ public:
         std::shared_ptr<IMavenRegistry> mvnRegistry,
         std::shared_ptr<IAICodeAssistant> aiAssistant,
         std::shared_ptr<IGradleParser> gradleParser,
-        const std::vector<DependencyMigration>& configMigrations, // Inject migrations config
+        const std::vector<DependencyMigration>& configMigrations,
         bool isDebug = false)
         : gitlab(glClient), maven(mvnRegistry), ai(aiAssistant), parser(gradleParser), 
           migrations(configMigrations), debugMode(isDebug) {}
 
     void RunWorkflow(const std::string& gitlabGroupId) {
-        std::cout << "Starting Dependency Update Workflow using AI Provider: "
-                  << ai->GetProviderName() << "\n";
-
+        std::cout << "Starting Multi-Module Dependency Update Workflow...\n";
         auto projects = gitlab->GetProjectsInGroup(gitlabGroupId);
         std::cout << "Found " << projects.size() << " projects in group " << gitlabGroupId << ".\n";
 
@@ -192,98 +187,112 @@ private:
         }
         for (const auto& mr : ourMrs) {
             if (!IsOlderThanOneMonth(mr.createdAt)) {
-                std::cout << "⏭️  Found recent active MR (" << mr.sourceBranch 
-                          << ") created less than a month ago. Skipping project.\n";
+                std::cout << "⏭️  Found recent active MR. Skipping project.\n";
                 return; 
             }
         }
         for (const auto& mr : ourMrs) {
-            std::cout << "🧹 Found stale MR (" << mr.sourceBranch 
-                      << ") older than 1 month. Closing MR and deleting branch...\n";
+            std::cout << "🧹 Closing stale MR (" << mr.sourceBranch << ")...\n";
             gitlab->CloseMergeRequest(project.projectId, mr.iid);
             gitlab->DeleteBranch(project.projectId, mr.sourceBranch);
         }
 
-        std::string buildFilePath = "build.gradle";
-        std::string buildGradle = gitlab->FetchFileContent(project.projectId, buildFilePath, project.defaultBranch);
-        if (buildGradle.empty()) {
-            buildFilePath = "build.gradle.kts";
-            buildGradle = gitlab->FetchFileContent(project.projectId, buildFilePath, project.defaultBranch);
-        }
-        if (buildGradle.empty()) {
-            std::cout << "No build.gradle / build.gradle.kts found on default branch. Skipping.\n";
+        std::cout << "Fetching full repository tree...\n";
+        auto allFiles = gitlab->GetSourceFiles(project.projectId, project.defaultBranch);
+        if (allFiles.empty()) {
+            std::cout << "No files found in repository. Skipping.\n";
             return;
         }
 
-        auto dependencies = parser->ParseDependencies(buildGradle);
-        std::vector<DependencyChange> appliedChanges;
-        std::string updatedGradle = buildGradle;
+        std::vector<std::string> buildFiles;
+        std::vector<std::string> sourceFiles;
+        
+        for (const auto& file : allFiles) {
+            if (file.ends_with("build.gradle") || file.ends_with("build.gradle.kts") || file.ends_with("gradle.properties")) {
+                buildFiles.push_back(file);
+            } else if (file.ends_with(".java") || file.ends_with(".kt")) {
+                sourceFiles.push_back(file);
+            }
+        }
 
-        for (const auto& dep : dependencies) {
-            auto latestOpt = maven->GetLatestVersion(dep);
-            if (latestOpt && *latestOpt != dep.version) {
-                Dependency newDep = {dep.group, dep.name, *latestOpt};
-                DependencyChange diff = maven->InspectVersionDiff(dep, newDep);
-                updatedGradle = parser->UpdateDependencyVersion(updatedGradle, dep, diff.newDep);
-                appliedChanges.push_back(diff);
-                
-                if (diff.hasPackageMove) {
-                    std::cout << "Migration found: " << dep.group << ":" << dep.name << " (" << dep.version << ") -> " 
-                              << diff.newDep.group << ":" << diff.newDep.name << " (" << diff.newDep.version << ")\n";
-                } else {
-                    std::cout << "Update found: " << dep.group << ":" << dep.name << " (" << dep.version << " -> " << diff.newDep.version << ")\n";
+        if (buildFiles.empty()) {
+            std::cout << "No Gradle build files found. Skipping.\n";
+            return;
+        }
+
+        std::vector<DependencyChange> masterChanges;
+        std::vector<std::string> modifiedBuildFiles;
+
+        auto now = std::chrono::system_clock::now().time_since_epoch().count();
+        std::string branchName = "chore/deps-update-" + std::to_string(now);
+        bool branchCreated = false;
+
+        // 1. PROCESS ALL BUILD FILES IN ALL MODULES
+        for (const auto& buildFilePath : buildFiles) {
+            std::string buildContent = gitlab->FetchFileContent(project.projectId, buildFilePath, project.defaultBranch);
+            if (buildContent.empty()) continue;
+
+            auto dependencies = parser->ParseDependencies(buildContent);
+            std::string updatedContent = buildContent;
+            bool fileChanged = false;
+
+            for (const auto& dep : dependencies) {
+                auto latestOpt = maven->GetLatestVersion(dep);
+                if (latestOpt && *latestOpt != dep.version) {
+                    Dependency newDep = {dep.group, dep.name, *latestOpt};
+                    DependencyChange diff = maven->InspectVersionDiff(dep, newDep);
+                    updatedContent = parser->UpdateDependencyVersion(updatedContent, dep, diff.newDep);
+                    masterChanges.push_back(diff);
+                    fileChanged = true;
+                    
+                    if (diff.hasPackageMove) {
+                        std::cout << "Migration found in " << buildFilePath << ": " << dep.name << " (" << dep.version << ") -> " << diff.newDep.group << ":" << diff.newDep.name << " (" << diff.newDep.version << ")\n";
+                    } else {
+                        std::cout << "Update found in " << buildFilePath << ": " << dep.name << " (" << dep.version << " -> " << diff.newDep.version << ")\n";
+                    }
+                }
+            }
+
+            if (fileChanged && updatedContent != buildContent) {
+                if (!branchCreated) {
+                    try {
+                        std::cout << "Creating branch: " << branchName << "\n";
+                        gitlab->CreateBranch(project.projectId, branchName, project.defaultBranch);
+                        branchCreated = true;
+                    } catch (const std::exception& e) {
+                        std::cerr << "🚫 Git operation failed for project '" << project.projectName << "'. Skipping. Reason: " << e.what() << "\n";
+                        return; 
+                    }
+                }
+
+                try {
+                    gitlab->CommitFile(project.projectId, branchName, buildFilePath, updatedContent, "chore: Update dependencies in " + buildFilePath);
+                    modifiedBuildFiles.push_back(buildFilePath);
+                } catch (const std::exception& e) {
+                    std::cerr << "🚫 Failed to commit build file '" << buildFilePath << "'.\n";
                 }
             }
         }
 
-        if (appliedChanges.empty()) {
-            std::cout << "All dependencies are up to date.\n";
+        if (masterChanges.empty() || !branchCreated) {
+            std::cout << "All dependencies across all modules are up to date.\n";
             return;
         }
 
-        CreateRefactoringMergeRequest(project, buildFilePath, updatedGradle, appliedChanges);
-    }
+        DeduplicateChanges(masterChanges);
+        std::vector<std::string> modifiedSourceFiles;
 
-    void CreateRefactoringMergeRequest(const ProjectContext& project, const std::string& buildFilePath,
-                                       const std::string& newGradle, const std::vector<DependencyChange>& changes) {
-        auto now = std::chrono::system_clock::now().time_since_epoch().count();
-        std::string branchName = "chore/deps-update-" + std::to_string(now);
+        std::cout << "Found " << sourceFiles.size() << " source files. Beginning Multi-Module AI refactoring...\n";
 
-        try {
-            std::cout << "Creating branch: " << branchName << "\n";
-            gitlab->CreateBranch(project.projectId, branchName, project.defaultBranch);
-            std::cout << "Committing updated " << buildFilePath << "...\n";
-            gitlab->CommitFile(project.projectId, branchName, buildFilePath, newGradle,
-                               "chore: Update dependencies in " + buildFilePath);
-        } catch (const std::exception& e) {
-            std::cerr << "🚫 Git operation failed for project '" << project.projectName 
-                      << "'. Skipping. Reason: " << e.what() << "\n";
-            return; 
-        }
-
-        std::cout << "Fetching source files for AI analysis...\n";
-        auto sourceFiles = gitlab->GetSourceFiles(project.projectId, project.defaultBranch);
-
-        if (sourceFiles.empty()) {
-            std::cout << "No source files found in repository.\n";
-        } else {
-            std::cout << "Found " << sourceFiles.size() << " source files. Beginning AI refactoring phase...\n";
-        }
-
-        std::vector<std::string> modifiedFiles;
-
+        // 2. PROCESS ALL SOURCE FILES ACROSS ALL MODULES
         for (const auto& filePath : sourceFiles) {
             std::string baseCode = gitlab->FetchFileContent(project.projectId, filePath, project.defaultBranch);
             if (baseCode.empty()) continue;
 
             std::vector<DependencyChange> relevantChanges;
-            for (const auto& change : changes) {
+            for (const auto& change : masterChanges) {
                 if (FileImportsDependency(baseCode, change)) {
-                    if (change.skipAI) {
-                        std::cout << " -> Skipping AI for internal dependency: " << change.oldDep.name << "\n";
-                    } else {
-                        relevantChanges.push_back(change);
-                    }
+                    if (!change.skipAI) relevantChanges.push_back(change);
                 }
             }
 
@@ -316,7 +325,7 @@ private:
             std::string rawAiCode = ai->RefactorCode(req);
             
             std::string workingCode = CleanAIOutput(rawAiCode, baseCode);
-            workingCode = PostProcessCode(workingCode, relevantChanges);
+            workingCode = PostProcessCode(workingCode, relevantChanges); // Apply appsettings.json rules!
 
             if (workingCode != baseCode) {
                 if (debugMode) {
@@ -329,9 +338,8 @@ private:
 
                 try {
                     std::cout << "AI refactored file: " << filePath << "\n";
-                    gitlab->CommitFile(project.projectId, branchName, filePath, workingCode,
-                                       "refactor: AI updates for dependency upgrades");
-                    modifiedFiles.push_back(filePath);
+                    gitlab->CommitFile(project.projectId, branchName, filePath, workingCode, "refactor: AI updates for dependency upgrades");
+                    modifiedSourceFiles.push_back(filePath);
                 } catch (const std::exception& e) {
                     std::cerr << "🚫 Failed to commit refactored file '" << filePath << "': " << e.what() << "\n";
                 }
@@ -339,11 +347,8 @@ private:
         }
 
         try {
-            std::string mrDescription = BuildMergeRequestDescription(changes, modifiedFiles, buildFilePath);
-            std::string mrUrl = gitlab->CreateMergeRequest(
-                project.projectId, branchName, project.defaultBranch,
-                "chore: Automated Dependency & Code Update", mrDescription
-            );
+            std::string mrDescription = BuildMergeRequestDescription(masterChanges, modifiedSourceFiles, modifiedBuildFiles);
+            std::string mrUrl = gitlab->CreateMergeRequest(project.projectId, branchName, project.defaultBranch, "chore: Automated Dependency & Code Update", mrDescription);
             std::cout << "Successfully created Merge Request: " << mrUrl << "\n";
         } catch (const std::exception& e) {
             std::cerr << "🚫 Failed to create Merge Request: " << e.what() << "\n";

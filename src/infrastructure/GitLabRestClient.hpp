@@ -131,8 +131,9 @@ public:
                 if (item["type"].get<std::string>() == "blob") {
                     std::string path = item["path"].get<std::string>();
                     
-                    // STRICT FILTERING: Only target core source code files.
-                    if (path.ends_with(".java") || path.ends_with(".kt") || path.ends_with(".kts")) {
+                    if (path.ends_with(".java") || path.ends_with(".kt") || 
+                        path.ends_with(".kts") || path.ends_with("build.gradle") || 
+                        path.ends_with("gradle.properties")) {
                         sourceFiles.push_back(path);
                     }
                 }

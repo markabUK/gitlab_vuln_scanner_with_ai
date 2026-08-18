@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <map>
+#include <vector>
 
 using json = nlohmann::json;
 
@@ -14,49 +15,53 @@ private:
     std::string model;
     std::string endpoint;
 
-    std::string CleanMarkdown(std::string text) {
-        size_t start = text.find("```");
-        if (start != std::string::npos) {
-            size_t nl = text.find('\n', start);
-            if (nl != std::string::npos) text.erase(start, (nl - start) + 1);
-        }
-        size_t end = text.rfind("```");
-        if (end != std::string::npos) text.erase(end, 3);
-        return text;
-    }
-
 public:
+    // Update default URL to use the structured /api/chat endpoint
     explicit OllamaAdapter(const std::string& modelName = "qwen2.5-coder:7b", 
-                           const std::string& url = "http://localhost:11434/api/generate")
+                           const std::string& url = "http://localhost:11434/api/chat")
         : model(modelName), endpoint(url) {}
 
     std::string GetProviderName() const override { return "Ollama (" + model + ")"; }
 
     std::string RefactorCode(const RefactorRequest& request) override {
-        std::string prompt = 
-            "You are an expert developer. A dependency was updated:\n" +
-            request.changeDetails.releaseNotes + "\n\n"
-            "Refactor this file for compatibility. Return ONLY raw code without markdown:\n\n" +
-            request.originalCode;
+        // System rules lock the model into "Code Refactoring" mode
+        std::string systemInstructions = 
+            "You are an automated, stateless code migration tool. "
+            "Your ONLY task is to refactor the provided code to match the dependency update rules. "
+            "You must rewrite the code completely, replacing all old library calls with the new ones. "
+            "Never return the code unchanged. Do not include markdown code blocks or conversational explanations. "
+            "Output ONLY the raw source code.";
 
+        std::string userPrompt = 
+            "DEPENDENCY UPDATE RELEASE NOTES & MIGRATION RULES:\n" + request.changeDetails.releaseNotes + "\n\n"
+            "ORIGINAL CODE TO REFACTOR:\n" + request.originalCode;
+
+        // Structured chat payload
         json payload = {
             {"model", model},
-            {"prompt", prompt},
+            {"messages", json::array({
+                {{"role", "system"}, {"content", systemInstructions}},
+                {{"role", "user"}, {"content", userPrompt}}
+            })},
             {"stream", false},
-            {"options", {{"temperature", 0.0}}}
+            {"options", {
+                {"temperature", 0.0},     // 0.0 forces deterministic, non-creative coding
+                {"num_ctx", 8192}         // VITAL: Allocates enough RAM for large Java files
+            }}
         };
 
         std::map<std::string, std::string> headers = {{"Content-Type", "application/json"}};
         auto res = HttpClient::Post(endpoint, payload.dump(), headers);
 
         if (res.statusCode != 200) {
-            std::cerr << "[AI ERROR] Ollama call failed: " << res.body << "\n";
+            std::cerr << "[AI ERROR] Ollama call failed (Status " << res.statusCode << "): " << res.body << "\n";
             return request.originalCode;
         }
 
         try {
             auto data = json::parse(res.body);
-            return CleanMarkdown(data["response"].get<std::string>());
+            // /api/chat returns the text inside a nested message object
+            return data["message"]["content"].get<std::string>();
         } catch (const std::exception& e) {
             std::cerr << "[AI ERROR] Failed to parse Ollama response: " << e.what() << "\n"
                       << "Full response: " << res.body << "\n";
