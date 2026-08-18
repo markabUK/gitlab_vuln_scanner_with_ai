@@ -2,6 +2,7 @@
 
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/AppSettings.hpp"
+#include "../infrastructure/StringUtils.hpp" // <-- Include the new utility
 #include <memory>
 #include <iostream>
 #include <sstream>
@@ -20,30 +21,6 @@ private:
     std::vector<DependencyMigration> migrations;
     bool debugMode;
 
-    std::string ReplaceAll(std::string str, const std::string& from, const std::string& to) {
-        if (from.empty()) return str;
-        size_t start_pos = 0;
-        while((start_pos = str.find(from, start_pos)) != std::string::npos) {
-            str.replace(start_pos, from.length(), to);
-            start_pos += to.length(); 
-        }
-        return str;
-    }
-
-    std::string CleanAIOutput(std::string code, const std::string& baseCode) {
-        size_t startTick = code.find("```");
-        if (startTick != std::string::npos) {
-            size_t startLineEnd = code.find('\n', startTick);
-            size_t endTick = code.rfind("```");
-            if (endTick != std::string::npos && endTick > startLineEnd) {
-                code = code.substr(startLineEnd + 1, endTick - startLineEnd - 1);
-            }
-        }
-        
-        if (code.length() < (baseCode.length() * 0.5)) return baseCode; 
-        return code;
-    }
-
     // Dynamic, Data-Driven Post Processor
     std::string PostProcessCode(std::string code, const std::vector<DependencyChange>& changes) {
         for (const auto& change : changes) {
@@ -51,7 +28,8 @@ private:
                 if (change.oldDep.group == migration.oldGroup && 
                    (migration.oldName.empty() || change.oldDep.name == migration.oldName)) {
                     for (const auto& rep : migration.replacements) {
-                        code = ReplaceAll(code, rep.search, rep.replace);
+                        // Use StringUtils instead of a private method
+                        code = StringUtils::ReplaceAll(code, rep.search, rep.replace); 
                     }
                 }
             }
@@ -139,7 +117,6 @@ private:
         return ss.str();
     }
 
-    // Helper to deduplicate changes (since submodules might update the same library)
     void DeduplicateChanges(std::vector<DependencyChange>& changes) {
         std::vector<DependencyChange> uniqueChanges;
         std::set<std::string> seenKeys;
@@ -227,7 +204,6 @@ private:
         std::string branchName = "chore/deps-update-" + std::to_string(now);
         bool branchCreated = false;
 
-        // 1. PROCESS ALL BUILD FILES IN ALL MODULES
         for (const auto& buildFilePath : buildFiles) {
             std::string buildContent = gitlab->FetchFileContent(project.projectId, buildFilePath, project.defaultBranch);
             if (buildContent.empty()) continue;
@@ -284,7 +260,6 @@ private:
 
         std::cout << "Found " << sourceFiles.size() << " source files. Beginning Multi-Module AI refactoring...\n";
 
-        // 2. PROCESS ALL SOURCE FILES ACROSS ALL MODULES
         for (const auto& filePath : sourceFiles) {
             std::string baseCode = gitlab->FetchFileContent(project.projectId, filePath, project.defaultBranch);
             if (baseCode.empty()) continue;
@@ -324,18 +299,11 @@ private:
             RefactorRequest req = {filePath, baseCode, combinedChange, ""};
             std::string rawAiCode = ai->RefactorCode(req);
             
-            std::string workingCode = CleanAIOutput(rawAiCode, baseCode);
-            workingCode = PostProcessCode(workingCode, relevantChanges); // Apply appsettings.json rules!
+            // Use StringUtils to clean the AI response
+            std::string workingCode = StringUtils::CleanAIOutput(rawAiCode, baseCode);
+            workingCode = PostProcessCode(workingCode, relevantChanges);
 
             if (workingCode != baseCode) {
-                if (debugMode) {
-                    std::cout << "\n=======================================================\n";
-                    std::cout << "🔍 [DEBUG] Original File: " << filePath << "\n";
-                    std::cout << "#######################################################\n";
-                    std::cout << baseCode << "\n";
-                    std::cout << "#######################################################\n\n";
-                }
-
                 try {
                     std::cout << "AI refactored file: " << filePath << "\n";
                     gitlab->CommitFile(project.projectId, branchName, filePath, workingCode, "refactor: AI updates for dependency upgrades");

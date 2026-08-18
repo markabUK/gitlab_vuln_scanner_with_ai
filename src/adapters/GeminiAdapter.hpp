@@ -2,6 +2,7 @@
 
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/HttpClient.hpp"
+#include "../infrastructure/StringUtils.hpp" // <-- Include shared utility
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <string>
@@ -24,17 +25,6 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(4500 - elapsed));
         }
         lastRequestTime = std::chrono::steady_clock::now();
-    }
-
-    std::string CleanMarkdownCodeBlocks(std::string text) {
-        size_t startTick = text.find("```");
-        if (startTick != std::string::npos) {
-            size_t endOfLine = text.find('\n', startTick);
-            if (endOfLine != std::string::npos) text.erase(startTick, (endOfLine - startTick) + 1);
-        }
-        size_t endTick = text.rfind("```");
-        if (endTick != std::string::npos) text.erase(endTick, 3);
-        return text;
     }
 
 public:
@@ -87,7 +77,9 @@ public:
                 try {
                     auto jsonResp = json::parse(response.body);
                     std::string aiCode = jsonResp["candidates"][0]["content"]["parts"][0]["text"].get<std::string>();
-                    return CleanMarkdownCodeBlocks(aiCode);
+                    
+                    // <-- Use centralized cleaner, passing base code for safety checks
+                    return StringUtils::CleanAIOutput(aiCode, request.originalCode); 
                 } catch (const std::exception& e) {
                     std::cerr << "[AI ERROR] Failed to parse Gemini response: " << e.what() << "\n"
                               << "Full response: " << response.body << "\n";

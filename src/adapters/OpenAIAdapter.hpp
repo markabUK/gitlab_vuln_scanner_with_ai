@@ -2,6 +2,7 @@
 
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/HttpClient.hpp"
+#include "../infrastructure/StringUtils.hpp" // <-- Include shared utility
 #include <nlohmann/json.hpp>
 #include <iostream>
 
@@ -40,8 +41,16 @@ public:
         auto response = HttpClient::Post("https://api.openai.com/v1/chat/completions", payload.dump(), headers);
 
         if (response.statusCode == 200) {
-            auto jsonResp = json::parse(response.body);
-            return jsonResp["choices"][0]["message"]["content"].get<std::string>();
+            try {
+                auto jsonResp = json::parse(response.body);
+                std::string rawAiResponse = jsonResp["choices"][0]["message"]["content"].get<std::string>();
+                
+                // <-- Use centralized cleaner
+                return StringUtils::CleanAIOutput(rawAiResponse, request.originalCode); 
+            } catch (const std::exception& e) {
+                std::cerr << "[AI ERROR] Failed to parse OpenAI response: " << e.what() << "\n";
+                return request.originalCode;
+            }
         }
         
         std::cerr << "OpenAI API failed: " << response.body << "\n";
@@ -49,7 +58,6 @@ public:
     }
 
     std::string GenerateMergeRequestDescription(const std::vector<DependencyChange>& appliedChanges) override {
-        // Implementation follows the same pattern, asking the LLM to write a Markdown MR summary.
         return "Automatically generated MR updating " + std::to_string(appliedChanges.size()) + " dependencies.";
     }
 };
