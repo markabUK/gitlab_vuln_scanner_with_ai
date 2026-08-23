@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <algorithm>
-#include <stdexcept> // For std::runtime_error
+#include <stdexcept>
 
 using json = nlohmann::json;
 
@@ -33,11 +33,11 @@ public:
         std::cout << "Fetching all projects in group " << groupId << " (including subgroups)...\n";
 
         while (hasMore) {
-            // CRITICAL FIX: added &archived=false to prevent querying dead/locked projects
             std::string url = baseUrl + "/api/v4/groups/" + groupId +
                               "/projects?include_subgroups=true&archived=false&per_page=100&page=" + std::to_string(page);
-
+            
             auto response = HttpClient::Get(url, GetAuthHeaders());
+            
             if (response.statusCode != 200) {
                 std::cerr << "Failed to fetch projects. GitLab API returned: " << response.statusCode << "\n";
                 break;
@@ -55,7 +55,6 @@ public:
             }
             page++;
         }
-
         return projects;
     }
 
@@ -69,10 +68,10 @@ public:
 
         std::string url = baseUrl + "/api/v4/projects/" + projectId +
                           "/repository/files/" + encodedPath + "/raw?ref=" + ref;
-
+        
         auto response = HttpClient::Get(url, GetAuthHeaders());
+        
         if (response.statusCode != 200) {
-            // It's okay if this fails (e.g. 404), we just return empty string and the orchestrator handles it
             return "";
         }
         return response.body;
@@ -81,12 +80,12 @@ public:
     void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) override {
         std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/branches";
         json payload = {{"branch", newBranch}, {"ref", refBranch}};
+        
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
         
-        // CRITICAL FIX: Throw on 403 Forbidden or other errors so the Orchestrator can cleanly skip this project
         if (response.statusCode != 200 && response.statusCode != 201) {
-            throw std::runtime_error("Failed to create branch '" + newBranch + 
-                                     "' (Status " + std::to_string(response.statusCode) + "): " + response.body);
+            throw std::runtime_error("Failed to create branch '" + newBranch +
+                                      "' (Status " + std::to_string(response.statusCode) + "): " + response.body);
         }
     }
 
@@ -102,12 +101,12 @@ public:
                 {"content", content}
             }}}
         };
+
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
         
-        // CRITICAL FIX: Throw exception on failure
         if (response.statusCode != 200 && response.statusCode != 201) {
-            throw std::runtime_error("Failed to commit file '" + filePath + 
-                                     "' (Status " + std::to_string(response.statusCode) + "): " + response.body);
+            throw std::runtime_error("Failed to commit file '" + filePath +
+                                      "' (Status " + std::to_string(response.statusCode) + "): " + response.body);
         }
     }
 
@@ -120,7 +119,7 @@ public:
             std::string url = baseUrl + "/api/v4/projects/" + projectId +
                               "/repository/tree?recursive=true&per_page=100&ref=" + ref +
                               "&page=" + std::to_string(page);
-
+            
             auto response = HttpClient::Get(url, GetAuthHeaders());
             if (response.statusCode != 200) break;
 
@@ -131,9 +130,13 @@ public:
                 if (item["type"].get<std::string>() == "blob") {
                     std::string path = item["path"].get<std::string>();
                     
-                    if (path.ends_with(".java") || path.ends_with(".kt") || 
-                        path.ends_with(".kts") || path.ends_with("build.gradle") || 
-                        path.ends_with("gradle.properties")) {
+                    // NEW: Added .slnx, .csproj, .fsproj, .cs, and .fs support
+                    if (path.ends_with(".java") || path.ends_with(".kt") ||
+                        path.ends_with(".kts") || path.ends_with("build.gradle") ||
+                        path.ends_with("gradle.properties") || 
+                        path.ends_with(".slnx") || path.ends_with(".csproj") || 
+                        path.ends_with(".fsproj") || path.ends_with(".cs") || 
+                        path.ends_with(".fs")) {
                         sourceFiles.push_back(path);
                     }
                 }
@@ -153,6 +156,7 @@ public:
             {"title", title},
             {"description", description}
         };
+
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
         
         if (response.statusCode == 201) {
@@ -160,14 +164,12 @@ public:
             return jsonResp["web_url"].get<std::string>();
         }
         
-        // CRITICAL FIX: Throw exception on failure
-        throw std::runtime_error("Failed to create Merge Request (Status " + 
-                                 std::to_string(response.statusCode) + "): " + response.body);
+        throw std::runtime_error("Failed to create Merge Request (Status " +
+                                  std::to_string(response.statusCode) + "): " + response.body);
     }
 
     std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) override {
         std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests?state=opened";
-        
         auto response = HttpClient::Get(url, GetAuthHeaders());
         
         std::vector<MergeRequest> mrs;
@@ -189,7 +191,6 @@ public:
     void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) override {
         std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests/" + mrIid;
         json payload = {{"state_event", "close"}};
-        
         HttpClient::Put(url, payload.dump(), GetAuthHeaders());
     }
 
@@ -199,9 +200,7 @@ public:
             if (c == '/') encodedBranch += "%2F";
             else encodedBranch += c;
         }
-
         std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/branches/" + encodedBranch;
-        
         HttpClient::Delete(url, GetAuthHeaders());
     }
 };

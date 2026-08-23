@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(GradleDependencyUpdater VERSION 1.0.0 LANGUAGES CXX)
+project(GradleDependencyUpdater VERSION 1.1.0 LANGUAGES CXX)
 
 # Enforce modern C++20 standard
 set(CMAKE_CXX_STANDARD 20)
@@ -38,7 +38,7 @@ CPMAddPackage(
     NAME cpr
     GITHUB_REPOSITORY libcpr/cpr
     VERSION 1.10.5
-    GIT_TAG 1.10.5   # <--- Add this explicitly
+    GIT_TAG 1.10.5
     OPTIONS
         "BUILD_SHARED_LIBS OFF"
         "CPR_ENABLE_SSL ON"

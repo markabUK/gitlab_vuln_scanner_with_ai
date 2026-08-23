@@ -71,3 +71,34 @@ public:
         const std::string& description
     ) = 0;
 };
+
+// ==========================================
+// 5. .NET Parser Interface
+// ==========================================
+class IDotNetParser {
+public:
+    virtual ~IDotNetParser() = default;
+    
+    // Parses .csproj, .fsproj, Directory.Build.props
+    virtual std::vector<Dependency> ParseDependencies(const std::string& projectContent) = 0;
+    
+    // Updates PackageReference elements
+    virtual std::string UpdateDependencyVersion(
+        const std::string& projectContent, 
+        const Dependency& oldDep, 
+        const Dependency& newDep
+    ) = 0;
+
+    // Parses the new XML-based .slnx format to extract project paths
+    virtual std::vector<std::string> ParseSlnxProjects(const std::string& slnxContent) = 0;
+};
+
+// ==========================================
+// 6. NuGet Registry Interface
+// ==========================================
+class INuGetRegistry {
+public:
+    virtual ~INuGetRegistry() = default;
+    virtual std::optional<std::string> GetLatestVersion(const Dependency& oldDep) = 0;
+    virtual DependencyChange InspectVersionDiff(const Dependency& oldDep, const Dependency& newDep) = 0;
+};

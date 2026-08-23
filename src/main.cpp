@@ -5,6 +5,7 @@
 #include <string>
 #include <filesystem>
 
+// Java / Core Infrastructure
 #include "infrastructure/AdvancedGradleParser.hpp"
 #include "infrastructure/MavenCentralRegistry.hpp"
 #include "infrastructure/GitLabMavenRegistry.hpp"
@@ -12,11 +13,19 @@
 #include "infrastructure/AppSettings.hpp"
 #include "infrastructure/GitLabRestClient.hpp"
 #include "infrastructure/DryRunGitLabClient.hpp"
+
+// .NET Infrastructure (NEW)
+#include "infrastructure/RegexDotNetParser.hpp"
+#include "infrastructure/NuGetV3Registry.hpp"
+
+// AI Adapters
 #include "adapters/GitLabDuoAdapter.hpp"
 #include "adapters/OpenAIAdapter.hpp"
 #include "adapters/GeminiAdapter.hpp"
 #include "adapters/OllamaAdapter.hpp"
 #include "adapters/DryRunAICodeAssistant.hpp"
+
+// Orchestrator
 #include "orchestration/DependencyUpdateOrchestrator.hpp"
 
 int main(int argc, char* argv[]) {
@@ -62,8 +71,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto parser = std::make_shared<AdvancedGradleParser>();
-    
+    // --- Instantiate Parsers ---
+    auto gradleParser = std::make_shared<AdvancedGradleParser>();
+    auto dotnetParser = std::make_shared<RegexDotNetParser>(); // NEW
+
+    // --- Instantiate Registries ---
     auto registryRouter = std::make_shared<CompositeRegistry>();
     for (const auto& regConfig : settings.registries) {
         if (regConfig.type == "GitLab") {
@@ -78,10 +90,14 @@ int main(int argc, char* argv[]) {
             );
         }
     }
-
-    std::shared_ptr<IGitLabClient> gitlabClient = std::make_shared<GitLabRestClient>(settings.gitlabHost, settings.gitlabToken);
-    std::shared_ptr<IAICodeAssistant> aiAssistant;
     
+    auto nugetRegistry = std::make_shared<NuGetV3Registry>(); // NEW
+
+    // --- Instantiate GitLab Client ---
+    std::shared_ptr<IGitLabClient> gitlabClient = std::make_shared<GitLabRestClient>(settings.gitlabHost, settings.gitlabToken);
+    
+    // --- Instantiate AI Assistant ---
+    std::shared_ptr<IAICodeAssistant> aiAssistant;
     if (settings.aiProvider == "OPENAI") {
         aiAssistant = std::make_shared<OpenAIAdapter>(settings.openAiApiKey);
     } 
@@ -90,14 +106,15 @@ int main(int argc, char* argv[]) {
     } 
     else if (settings.aiProvider == "OLLAMA") {
         aiAssistant = std::make_shared<OllamaAdapter>(settings.ollamaModel, settings.ollamaEndpoint);
-    }
+    } 
     else {
         aiAssistant = std::make_shared<GeminiAdapter>(settings.geminiApiKey);
     }
-    
+
+    // --- Dry Run Mode Interception ---
     if (isDryRun) {
         std::cout << "\n============================================\n";
-        std::cout << " ⚠️  DRY RUN MODE ACTIVATED ⚠️\n";
+        std::cout << "    DRY RUN MODE ACTIVATED  \n";
         gitlabClient = std::make_shared<DryRunGitLabClient>(gitlabClient);
         
         if (isOffline) {
@@ -105,11 +122,20 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "============================================\n\n";
     }
-    
+
     bool enableDebugOutput = isDryRun || isDebug;
 
-    // PASS CONFIG MIGRATIONS TO THE ORCHESTRATOR
-    DependencyUpdateOrchestrator orchestrator(gitlabClient, registryRouter, aiAssistant, parser, settings.migrations, enableDebugOutput);
+    // --- Run Orchestrator ---
+    DependencyUpdateOrchestrator orchestrator(
+        gitlabClient, 
+        registryRouter, 
+        aiAssistant, 
+        gradleParser, 
+        dotnetParser,   // INJECT .NET Parser
+        nugetRegistry,  // INJECT NuGet Registry
+        settings.migrations, 
+        enableDebugOutput
+    );
 
     try {
         orchestrator.RunWorkflow(groupId);
