@@ -5,18 +5,24 @@
 #include <string>
 #include <filesystem>
 
-// Java / Core Infrastructure
-#include "infrastructure/AdvancedGradleParser.hpp"
-#include "infrastructure/MavenCentralRegistry.hpp"
-#include "infrastructure/GitLabMavenRegistry.hpp"
-#include "infrastructure/CompositeRegistry.hpp"
+// Core Infrastructure
 #include "infrastructure/AppSettings.hpp"
 #include "infrastructure/GitLabRestClient.hpp"
 #include "infrastructure/DryRunGitLabClient.hpp"
+#include "infrastructure/CompositeRegistry.hpp"
 
-// .NET Infrastructure (NEW)
+// Parsers & Registries
+#include "infrastructure/AdvancedGradleParser.hpp"
+#include "infrastructure/RegexPomParser.hpp"
+#include "infrastructure/RegexAntParser.hpp"       // NEW
+#include "infrastructure/MavenCentralRegistry.hpp"
+#include "infrastructure/GitLabMavenRegistry.hpp"
 #include "infrastructure/RegexDotNetParser.hpp"
 #include "infrastructure/NuGetV3Registry.hpp"
+#include "infrastructure/RegexGoParser.hpp"
+#include "infrastructure/GoModulesRegistry.hpp"
+#include "infrastructure/RegexNpmParser.hpp"       // NEW
+#include "infrastructure/NpmRegistry.hpp"          // NEW
 
 // AI Adapters
 #include "adapters/GitLabDuoAdapter.hpp"
@@ -24,6 +30,12 @@
 #include "adapters/GeminiAdapter.hpp"
 #include "adapters/OllamaAdapter.hpp"
 #include "adapters/DryRunAICodeAssistant.hpp"
+
+// Ecosystem Handlers (Strategy Pattern)
+#include "orchestration/JavaHandler.hpp"           // REPLACES Gradle/Maven Handlers
+#include "orchestration/DotNetHandler.hpp"
+#include "orchestration/GoHandler.hpp"
+#include "orchestration/NodeHandler.hpp"           // NEW
 
 // Orchestrator
 #include "orchestration/DependencyUpdateOrchestrator.hpp"
@@ -71,32 +83,38 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // --- Instantiate Parsers ---
+    // --- 1. Instantiate Parsers ---
     auto gradleParser = std::make_shared<AdvancedGradleParser>();
-    auto dotnetParser = std::make_shared<RegexDotNetParser>(); // NEW
+    auto pomParser = std::make_shared<RegexPomParser>();
+    auto antParser = std::make_shared<RegexAntParser>();         // INJECTED
+    auto dotnetParser = std::make_shared<RegexDotNetParser>();
+    auto goParser = std::make_shared<RegexGoParser>();
+    auto npmParser = std::make_shared<RegexNpmParser>();         // INJECTED
 
-    // --- Instantiate Registries ---
-    auto registryRouter = std::make_shared<CompositeRegistry>();
+    // --- 2. Instantiate Registries ---
+    auto mavenRegistryRouter = std::make_shared<CompositeRegistry>();
     for (const auto& regConfig : settings.registries) {
         if (regConfig.type == "GitLab") {
-            registryRouter->AddRegistry(
+            mavenRegistryRouter->AddRegistry(
                 std::make_shared<GitLabMavenRegistry>(regConfig.url, regConfig.token),
                 regConfig.groupPrefixes
             );
         } else {
-            registryRouter->AddRegistry(
+            mavenRegistryRouter->AddRegistry(
                 std::make_shared<MavenCentralRegistry>(settings.migrations),
                 regConfig.groupPrefixes
             );
         }
     }
     
-    auto nugetRegistry = std::make_shared<NuGetV3Registry>(); // NEW
+    auto nugetRegistry = std::make_shared<NuGetV3Registry>();
+    auto goRegistry = std::make_shared<GoModulesRegistry>();
+    auto npmRegistry = std::make_shared<NpmRegistry>();          // INJECTED
 
-    // --- Instantiate GitLab Client ---
+    // --- 3. Instantiate GitLab Client ---
     std::shared_ptr<IGitLabClient> gitlabClient = std::make_shared<GitLabRestClient>(settings.gitlabHost, settings.gitlabToken);
     
-    // --- Instantiate AI Assistant ---
+    // --- 4. Instantiate AI Assistant ---
     std::shared_ptr<IAICodeAssistant> aiAssistant;
     if (settings.aiProvider == "OPENAI") {
         aiAssistant = std::make_shared<OpenAIAdapter>(settings.openAiApiKey);
@@ -111,7 +129,7 @@ int main(int argc, char* argv[]) {
         aiAssistant = std::make_shared<GeminiAdapter>(settings.geminiApiKey);
     }
 
-    // --- Dry Run Mode Interception ---
+    // --- 5. Dry Run Mode Interception ---
     if (isDryRun) {
         std::cout << "\n============================================\n";
         std::cout << "    DRY RUN MODE ACTIVATED  \n";
@@ -125,17 +143,25 @@ int main(int argc, char* argv[]) {
 
     bool enableDebugOutput = isDryRun || isDebug;
 
-    // --- Run Orchestrator ---
-    DependencyUpdateOrchestrator orchestrator(
-        gitlabClient, 
-        registryRouter, 
-        aiAssistant, 
-        gradleParser, 
-        dotnetParser,   // INJECT .NET Parser
-        nugetRegistry,  // INJECT NuGet Registry
-        settings.migrations, 
-        enableDebugOutput
-    );
+    // --- 6. Wire up Ecosystem Handlers ---
+    std::vector<std::shared_ptr<IEcosystemHandler>> handlers;
+    
+    // Unified Java Handler (Gradle, Maven, Ant)
+    handlers.push_back(std::make_shared<JavaHandler>(
+        gitlabClient, aiAssistant, gradleParser, pomParser, antParser, mavenRegistryRouter, settings.migrations));
+        
+    handlers.push_back(std::make_shared<DotNetHandler>(
+        gitlabClient, aiAssistant, dotnetParser, nugetRegistry, settings.migrations));
+        
+    handlers.push_back(std::make_shared<GoHandler>(
+        gitlabClient, aiAssistant, goParser, goRegistry, settings.migrations));
+        
+    // Node.js Handler
+    handlers.push_back(std::make_shared<NodeHandler>(
+        gitlabClient, aiAssistant, npmParser, npmRegistry, settings.migrations));
+
+    // --- 7. Run Orchestrator ---
+    DependencyUpdateOrchestrator orchestrator(gitlabClient, handlers, enableDebugOutput);
 
     try {
         orchestrator.RunWorkflow(groupId);

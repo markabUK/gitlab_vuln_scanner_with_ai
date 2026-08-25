@@ -110,7 +110,8 @@ public:
         }
     }
 
-    std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref) override {
+    // UPDATED: Dynamic extension filtering
+    std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref, const std::vector<std::string>& extensions) override {
         std::vector<std::string> sourceFiles;
         int page = 1;
         bool hasMore = true;
@@ -130,13 +131,15 @@ public:
                 if (item["type"].get<std::string>() == "blob") {
                     std::string path = item["path"].get<std::string>();
                     
-                    // NEW: Added .slnx, .csproj, .fsproj, .cs, and .fs support
-                    if (path.ends_with(".java") || path.ends_with(".kt") ||
-                        path.ends_with(".kts") || path.ends_with("build.gradle") ||
-                        path.ends_with("gradle.properties") || 
-                        path.ends_with(".slnx") || path.ends_with(".csproj") || 
-                        path.ends_with(".fsproj") || path.ends_with(".cs") || 
-                        path.ends_with(".fs")) {
+                    bool matches = false;
+                    for (const auto& ext : extensions) {
+                        if (path.ends_with(ext)) {
+                            matches = true;
+                            break;
+                        }
+                    }
+                    
+                    if (matches) {
                         sourceFiles.push_back(path);
                     }
                 }
