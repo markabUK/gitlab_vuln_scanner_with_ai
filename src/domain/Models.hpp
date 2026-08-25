@@ -24,7 +24,7 @@ struct RefactorRequest {
     std::string filePath;
     std::string originalCode;
     DependencyChange changeDetails;
-    std::string customPromptContext; // Optional user prompt extensions
+    std::string customPromptContext;
 };
 
 struct ProjectContext {
@@ -32,12 +32,22 @@ struct ProjectContext {
     std::string projectName;
     std::string defaultBranch;
     std::string rawBuildGradle;
-    std::vector<std::string> sourceFiles; // Paths to Java/Kotlin source files
+    std::vector<std::string> sourceFiles; 
+};
+
+// NEW: Commit model to track author contributions
+struct Commit {
+    std::string id;
+    std::string authorName;
+    std::string authorEmail;
+    std::string title;
 };
 
 struct MergeRequest {
     std::string iid;
     std::string title;
     std::string sourceBranch;
-    std::string createdAt; // ISO8601 format (e.g., 2026-08-17T15:23:45Z)
+    std::string createdAt; 
+    std::string webUrl;      // NEW: For chat links
+    std::string authorEmail; // NEW: To identify if the bot owns it
 };

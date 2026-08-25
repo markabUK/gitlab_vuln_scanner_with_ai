@@ -13,6 +13,10 @@ public:
     explicit DryRunGitLabClient(std::shared_ptr<IGitLabClient> client)
         : realClient(std::move(client)) {}
 
+    std::optional<ProjectContext> GetProject(const std::string& projectId) override {
+        return realClient->GetProject(projectId);
+    }
+
     std::vector<ProjectContext> GetProjectsInGroup(const std::string& groupId) override {
         return realClient->GetProjectsInGroup(groupId);
     }
@@ -21,7 +25,6 @@ public:
         return realClient->FetchFileContent(projectId, filePath, ref);
     }
 
-    // UPDATED: Now matches the interface signature with dynamic extensions
     std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref, const std::vector<std::string>& extensions) override {
         return realClient->GetSourceFiles(projectId, ref, extensions);
     }
@@ -39,7 +42,6 @@ public:
         std::cout << "   [FULL REFACTORED CODE BY AI]:\n";
         std::cout << "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv\n";
         
-        // Print the complete refactored code from the AI
         std::cout << content << "\n";
         
         std::cout << "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n";
@@ -57,6 +59,11 @@ public:
 
     std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) override {
         return realClient->GetOpenMergeRequests(projectId); // Safe to read
+    }
+
+    // NEW: Passthrough for GetMergeRequestCommits
+    std::vector<Commit> GetMergeRequestCommits(const std::string& projectId, const std::string& mrIid) override {
+        return realClient->GetMergeRequestCommits(projectId, mrIid); // Safe to read
     }
 
     void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) override {

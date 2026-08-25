@@ -10,19 +10,20 @@
 #include "infrastructure/GitLabRestClient.hpp"
 #include "infrastructure/DryRunGitLabClient.hpp"
 #include "infrastructure/CompositeRegistry.hpp"
+#include "infrastructure/GoogleChatNotifier.hpp"
 
 // Parsers & Registries
 #include "infrastructure/AdvancedGradleParser.hpp"
 #include "infrastructure/RegexPomParser.hpp"
-#include "infrastructure/RegexAntParser.hpp"       // NEW
+#include "infrastructure/RegexAntParser.hpp"
 #include "infrastructure/MavenCentralRegistry.hpp"
 #include "infrastructure/GitLabMavenRegistry.hpp"
 #include "infrastructure/RegexDotNetParser.hpp"
 #include "infrastructure/NuGetV3Registry.hpp"
 #include "infrastructure/RegexGoParser.hpp"
 #include "infrastructure/GoModulesRegistry.hpp"
-#include "infrastructure/RegexNpmParser.hpp"       // NEW
-#include "infrastructure/NpmRegistry.hpp"          // NEW
+#include "infrastructure/RegexNpmParser.hpp"
+#include "infrastructure/NpmRegistry.hpp"
 
 // AI Adapters
 #include "adapters/GitLabDuoAdapter.hpp"
@@ -31,17 +32,15 @@
 #include "adapters/OllamaAdapter.hpp"
 #include "adapters/DryRunAICodeAssistant.hpp"
 
-// Ecosystem Handlers (Strategy Pattern)
-#include "orchestration/JavaHandler.hpp"           // REPLACES Gradle/Maven Handlers
+// Ecosystem Handlers
+#include "orchestration/JavaHandler.hpp"
 #include "orchestration/DotNetHandler.hpp"
 #include "orchestration/GoHandler.hpp"
-#include "orchestration/NodeHandler.hpp"           // NEW
-
-// Orchestrator
+#include "orchestration/NodeHandler.hpp"
 #include "orchestration/DependencyUpdateOrchestrator.hpp"
 
 int main(int argc, char* argv[]) {
-    std::string groupId = "";
+    std::string cliOverrideTargetId = "";
     bool isDryRun = false;
     bool isOffline = false;
     bool isDebug = false;
@@ -60,14 +59,9 @@ int main(int argc, char* argv[]) {
             isDebug = true;
         } else if (arg.find("--config=") == 0) {
             configPath = arg.substr(9);
-        } else if (groupId.empty()) {
-            groupId = arg;
+        } else if (cliOverrideTargetId.empty() && arg[0] != '-') {
+            cliOverrideTargetId = arg;
         }
-    }
-
-    if (groupId.empty()) {
-        std::cerr << "Usage: " << argv[0] << " <GitLab-Group-ID> [--dry-run] [--dry-run-offline] [--debug] [--config=/path/to/appsettings.json]\n";
-        return 1;
     }
 
     AppSettings settings;
@@ -83,13 +77,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    if (!cliOverrideTargetId.empty()) {
+        settings.target.id = cliOverrideTargetId;
+    }
+
+    if (settings.target.id.empty()) {
+        std::cerr << "Usage Error: Target ID must be specified either in the config file (Target.Id) or as a command line argument.\n";
+        std::cerr << "Command: " << argv[0] << " [Target-ID] [--dry-run] [--dry-run-offline] [--debug] [--config=/path/to/appsettings.json]\n";
+        return 1;
+    }
+
     // --- 1. Instantiate Parsers ---
     auto gradleParser = std::make_shared<AdvancedGradleParser>();
     auto pomParser = std::make_shared<RegexPomParser>();
-    auto antParser = std::make_shared<RegexAntParser>();         // INJECTED
+    auto antParser = std::make_shared<RegexAntParser>();
     auto dotnetParser = std::make_shared<RegexDotNetParser>();
     auto goParser = std::make_shared<RegexGoParser>();
-    auto npmParser = std::make_shared<RegexNpmParser>();         // INJECTED
+    auto npmParser = std::make_shared<RegexNpmParser>();
 
     // --- 2. Instantiate Registries ---
     auto mavenRegistryRouter = std::make_shared<CompositeRegistry>();
@@ -109,23 +113,21 @@ int main(int argc, char* argv[]) {
     
     auto nugetRegistry = std::make_shared<NuGetV3Registry>();
     auto goRegistry = std::make_shared<GoModulesRegistry>();
-    auto npmRegistry = std::make_shared<NpmRegistry>();          // INJECTED
+    auto npmRegistry = std::make_shared<NpmRegistry>();
 
-    // --- 3. Instantiate GitLab Client ---
+    // --- 3. Instantiate Clients ---
     std::shared_ptr<IGitLabClient> gitlabClient = std::make_shared<GitLabRestClient>(settings.gitlabHost, settings.gitlabToken);
+    std::shared_ptr<INotificationClient> chatNotifier = std::make_shared<GoogleChatNotifier>(settings.googleChatWebhook);
     
     // --- 4. Instantiate AI Assistant ---
     std::shared_ptr<IAICodeAssistant> aiAssistant;
     if (settings.aiProvider == "OPENAI") {
         aiAssistant = std::make_shared<OpenAIAdapter>(settings.openAiApiKey);
-    } 
-    else if (settings.aiProvider == "DUO") {
+    } else if (settings.aiProvider == "DUO") {
         aiAssistant = std::make_shared<GitLabDuoAdapter>(settings.gitlabHost, settings.gitlabToken);
-    } 
-    else if (settings.aiProvider == "OLLAMA") {
+    } else if (settings.aiProvider == "OLLAMA") {
         aiAssistant = std::make_shared<OllamaAdapter>(settings.ollamaModel, settings.ollamaEndpoint);
-    } 
-    else {
+    } else {
         aiAssistant = std::make_shared<GeminiAdapter>(settings.geminiApiKey);
     }
 
@@ -146,7 +148,6 @@ int main(int argc, char* argv[]) {
     // --- 6. Wire up Ecosystem Handlers ---
     std::vector<std::shared_ptr<IEcosystemHandler>> handlers;
     
-    // Unified Java Handler (Gradle, Maven, Ant)
     handlers.push_back(std::make_shared<JavaHandler>(
         gitlabClient, aiAssistant, gradleParser, pomParser, antParser, mavenRegistryRouter, settings.migrations));
         
@@ -156,15 +157,21 @@ int main(int argc, char* argv[]) {
     handlers.push_back(std::make_shared<GoHandler>(
         gitlabClient, aiAssistant, goParser, goRegistry, settings.migrations));
         
-    // Node.js Handler
     handlers.push_back(std::make_shared<NodeHandler>(
         gitlabClient, aiAssistant, npmParser, npmRegistry, settings.migrations));
 
     // --- 7. Run Orchestrator ---
-    DependencyUpdateOrchestrator orchestrator(gitlabClient, handlers, enableDebugOutput);
+    // UPDATED: Removed botEmail from injection
+    DependencyUpdateOrchestrator orchestrator(
+        gitlabClient, 
+        handlers, 
+        settings.target, 
+        chatNotifier, 
+        enableDebugOutput
+    );
 
     try {
-        orchestrator.RunWorkflow(groupId);
+        orchestrator.RunWorkflow();
     } catch (const std::exception& e) {
         std::cerr << "Workflow failed with exception: " << e.what() << "\n";
         return 1;

@@ -21,9 +21,41 @@ private:
         };
     }
 
+    std::string UrlEncode(std::string value) {
+        size_t pos = 0;
+        while ((pos = value.find('/', pos)) != std::string::npos) {
+            value.replace(pos, 1, "%2F");
+            pos += 3;
+        }
+        return value;
+    }
+
 public:
     GitLabRestClient(const std::string& url, const std::string& token)
         : baseUrl(url), apiToken(token) {}
+
+    std::optional<ProjectContext> GetProject(const std::string& projectId) override {
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId);
+        
+        auto response = HttpClient::Get(url, GetAuthHeaders());
+        
+        if (response.statusCode != 200) {
+            std::cerr << "Failed to fetch project '" << projectId << "'. GitLab API returned: " << response.statusCode << "\n";
+            return std::nullopt;
+        }
+
+        try {
+            auto item = json::parse(response.body);
+            ProjectContext ctx;
+            ctx.projectId = std::to_string(item["id"].get<int>());
+            ctx.projectName = item["path_with_namespace"].get<std::string>();
+            ctx.defaultBranch = item.value("default_branch", "main");
+            return ctx;
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to parse project JSON for '" << projectId << "': " << e.what() << "\n";
+            return std::nullopt;
+        }
+    }
 
     std::vector<ProjectContext> GetProjectsInGroup(const std::string& groupId) override {
         std::vector<ProjectContext> projects;
@@ -33,7 +65,7 @@ public:
         std::cout << "Fetching all projects in group " << groupId << " (including subgroups)...\n";
 
         while (hasMore) {
-            std::string url = baseUrl + "/api/v4/groups/" + groupId +
+            std::string url = baseUrl + "/api/v4/groups/" + UrlEncode(groupId) +
                               "/projects?include_subgroups=true&archived=false&per_page=100&page=" + std::to_string(page);
             
             auto response = HttpClient::Get(url, GetAuthHeaders());
@@ -59,15 +91,8 @@ public:
     }
 
     std::string FetchFileContent(const std::string& projectId, const std::string& filePath, const std::string& ref) override {
-        std::string encodedPath = filePath;
-        size_t pos = 0;
-        while ((pos = encodedPath.find('/', pos)) != std::string::npos) {
-            encodedPath.replace(pos, 1, "%2F");
-            pos += 3;
-        }
-
-        std::string url = baseUrl + "/api/v4/projects/" + projectId +
-                          "/repository/files/" + encodedPath + "/raw?ref=" + ref;
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) +
+                          "/repository/files/" + UrlEncode(filePath) + "/raw?ref=" + ref;
         
         auto response = HttpClient::Get(url, GetAuthHeaders());
         
@@ -78,7 +103,7 @@ public:
     }
 
     void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) override {
-        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/branches";
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/repository/branches";
         json payload = {{"branch", newBranch}, {"ref", refBranch}};
         
         auto response = HttpClient::Post(url, payload.dump(), GetAuthHeaders());
@@ -91,7 +116,7 @@ public:
 
     void CommitFile(const std::string& projectId, const std::string& branch, const std::string& filePath,
                     const std::string& content, const std::string& commitMessage) override {
-        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/commits";
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/repository/commits";
         json payload = {
             {"branch", branch},
             {"commit_message", commitMessage},
@@ -110,14 +135,13 @@ public:
         }
     }
 
-    // UPDATED: Dynamic extension filtering
     std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref, const std::vector<std::string>& extensions) override {
         std::vector<std::string> sourceFiles;
         int page = 1;
         bool hasMore = true;
 
         while (hasMore) {
-            std::string url = baseUrl + "/api/v4/projects/" + projectId +
+            std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) +
                               "/repository/tree?recursive=true&per_page=100&ref=" + ref +
                               "&page=" + std::to_string(page);
             
@@ -152,7 +176,7 @@ public:
     std::string CreateMergeRequest(const std::string& projectId, const std::string& sourceBranch,
                                    const std::string& targetBranch, const std::string& title,
                                    const std::string& description) override {
-        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests";
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/merge_requests";
         json payload = {
             {"source_branch", sourceBranch},
             {"target_branch", targetBranch},
@@ -172,7 +196,7 @@ public:
     }
 
     std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) override {
-        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests?state=opened";
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/merge_requests?state=opened";
         auto response = HttpClient::Get(url, GetAuthHeaders());
         
         std::vector<MergeRequest> mrs;
@@ -185,25 +209,45 @@ public:
                 mr.sourceBranch = item["source_branch"].get<std::string>();
                 mr.createdAt = item["created_at"].get<std::string>();
                 
+                // NEW: Populate MR web URL and author info
+                mr.webUrl = item.value("web_url", "");
+                if (item.contains("author")) {
+                    mr.authorEmail = item["author"].value("email", "");
+                }
+                
                 mrs.push_back(mr);
             }
         }
         return mrs;
     }
 
+    std::vector<Commit> GetMergeRequestCommits(const std::string& projectId, const std::string& mrIid) override {
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/merge_requests/" + mrIid + "/commits";
+        auto response = HttpClient::Get(url, GetAuthHeaders());
+        
+        std::vector<Commit> commits;
+        if (response.statusCode == 200) {
+            auto jsonArray = json::parse(response.body);
+            for (const auto& item : jsonArray) {
+                Commit commit;
+                commit.id = item.value("id", "");
+                commit.authorName = item.value("author_name", "");
+                commit.authorEmail = item.value("author_email", "");
+                commit.title = item.value("title", "");
+                commits.push_back(commit);
+            }
+        }
+        return commits;
+    }
+
     void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) override {
-        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/merge_requests/" + mrIid;
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/merge_requests/" + mrIid;
         json payload = {{"state_event", "close"}};
         HttpClient::Put(url, payload.dump(), GetAuthHeaders());
     }
 
     void DeleteBranch(const std::string& projectId, const std::string& branchName) override {
-        std::string encodedBranch;
-        for (char c : branchName) {
-            if (c == '/') encodedBranch += "%2F";
-            else encodedBranch += c;
-        }
-        std::string url = baseUrl + "/api/v4/projects/" + projectId + "/repository/branches/" + encodedBranch;
+        std::string url = baseUrl + "/api/v4/projects/" + UrlEncode(projectId) + "/repository/branches/" + UrlEncode(branchName);
         HttpClient::Delete(url, GetAuthHeaders());
     }
 };

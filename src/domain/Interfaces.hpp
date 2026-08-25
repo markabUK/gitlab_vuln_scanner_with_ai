@@ -43,11 +43,16 @@ public:
 class IGitLabClient {
 public:
     virtual ~IGitLabClient() = default;
+    virtual std::optional<ProjectContext> GetProject(const std::string& projectId) = 0;
     virtual std::vector<ProjectContext> GetProjectsInGroup(const std::string& groupId) = 0;
     virtual std::string FetchFileContent(const std::string& projectId, const std::string& filePath, const std::string& ref) = 0;
     virtual std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref, const std::vector<std::string>& extensions) = 0;
     virtual void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) = 0;
     virtual std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) = 0;
+    
+    // NEW: Fetch commits for a specific MR
+    virtual std::vector<Commit> GetMergeRequestCommits(const std::string& projectId, const std::string& mrIid) = 0;
+    
     virtual void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) = 0;
     virtual void DeleteBranch(const std::string& projectId, const std::string& branchName) = 0;
     virtual void CommitFile(const std::string& projectId, const std::string& branch, const std::string& filePath, const std::string& content, const std::string& commitMessage) = 0;
@@ -106,7 +111,7 @@ public:
 };
 
 // ==========================================
-// 10. Ant Parser Interface (NEW)
+// 10. Ant Parser Interface
 // ==========================================
 class IAntParser {
 public:
@@ -116,7 +121,7 @@ public:
 };
 
 // ==========================================
-// 11. NPM Parser Interface (NEW)
+// 11. NPM Parser Interface
 // ==========================================
 class INpmParser {
 public:
@@ -126,7 +131,7 @@ public:
 };
 
 // ==========================================
-// 12. NPM Registry Interface (NEW)
+// 12. NPM Registry Interface
 // ==========================================
 class INpmRegistry {
 public:
@@ -144,4 +149,18 @@ public:
     virtual std::string GetEcosystemName() const = 0;
     virtual std::vector<std::string> GetTargetExtensions() const = 0;
     virtual void Process(const ProjectContext& project, const std::vector<std::string>& repoFiles) = 0;
+};
+
+// ==========================================
+// 14. Notification Client Interface (NEW)
+// ==========================================
+class INotificationClient {
+public:
+    virtual ~INotificationClient() = default;
+    virtual void NotifyUserOfSkippedMR(
+        const std::string& projectName, 
+        const std::string& humanAuthorName, 
+        const std::string& humanAuthorEmail, 
+        const std::string& mrUrl
+    ) = 0;
 };
