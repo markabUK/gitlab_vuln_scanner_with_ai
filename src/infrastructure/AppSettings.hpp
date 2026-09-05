@@ -1,8 +1,11 @@
 #pragma once
 
+#include "../domain/Models.hpp"
 #include <string>
 #include <vector>
 #include <fstream>
+#include <sstream>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <filesystem>
@@ -16,19 +19,6 @@ struct RegistryConfig {
     std::vector<std::string> groupPrefixes;
 };
 
-struct CodeReplacement {
-    std::string search;
-    std::string replace;
-};
-
-struct DependencyMigration {
-    std::string oldGroup;
-    std::string oldName;
-    std::string newGroup;
-    std::string newName;
-    std::vector<CodeReplacement> replacements;
-};
-
 struct TargetConfig {
     std::string type; 
     std::string id;   
@@ -40,7 +30,7 @@ class AppSettings {
 public:
     std::string gitlabHost;
     std::string gitlabToken;
-    std::string botEmail;           // NEW: Identifies commits made by the bot
+    std::string botEmail;
     
     std::string aiProvider;
     std::string geminiApiKey;
@@ -48,7 +38,7 @@ public:
     std::string ollamaEndpoint;
     std::string ollamaModel;
     
-    std::string googleChatWebhook;  // NEW: Webhook URL for Google Chat space
+    std::string googleChatWebhook;
     
     TargetConfig target;
     std::vector<RegistryConfig> registries;
@@ -93,15 +83,19 @@ public:
             }
         }
 
-        for (const auto& regJson : j["Registries"]) {
-            RegistryConfig reg;
-            reg.type = regJson.value("Type", "MavenCentral");
-            reg.url = regJson.value("Url", "");
-            reg.token = regJson.value("Token", "");
-            for (const auto& prefix : regJson["GroupPrefixes"]) {
-                reg.groupPrefixes.push_back(prefix.get<std::string>());
+        if (j.contains("Registries")) {
+            for (const auto& regJson : j["Registries"]) {
+                RegistryConfig reg;
+                reg.type = regJson.value("Type", "MavenCentral");
+                reg.url = regJson.value("Url", "");
+                reg.token = regJson.value("Token", "");
+                if (regJson.contains("GroupPrefixes")) {
+                    for (const auto& prefix : regJson["GroupPrefixes"]) {
+                        reg.groupPrefixes.push_back(prefix.get<std::string>());
+                    }
+                }
+                settings.registries.push_back(reg);
             }
-            settings.registries.push_back(reg);
         }
 
         if (j.contains("Migrations")) {
@@ -111,6 +105,18 @@ public:
                 dm.oldName = mJson.value("OldName", "");
                 dm.newGroup = mJson.value("NewGroup", "");
                 dm.newName = mJson.value("NewName", "");
+                
+                dm.migrationDocPath = mJson.value("MigrationDocPath", "");
+                if (!dm.migrationDocPath.empty()) {
+                    if (std::filesystem::exists(dm.migrationDocPath)) {
+                        std::ifstream docFile(dm.migrationDocPath);
+                        std::stringstream buffer;
+                        buffer << docFile.rdbuf();
+                        dm.migrationDocContent = buffer.str();
+                    } else {
+                        std::cerr << "Warning: MigrationDocPath not found: " << dm.migrationDocPath << "\n";
+                    }
+                }
                 
                 if (mJson.contains("Replacements")) {
                     for (const auto& repJson : mJson["Replacements"]) {

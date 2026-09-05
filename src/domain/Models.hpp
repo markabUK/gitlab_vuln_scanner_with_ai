@@ -10,6 +10,23 @@ struct Dependency {
     std::string version;
 };
 
+struct CodeReplacement {
+    std::string search;
+    std::string replace;
+};
+
+struct DependencyMigration {
+    std::string oldGroup;
+    std::string oldName;
+    std::string newGroup;
+    std::string newName;
+    
+    std::string migrationDocPath;     // NEW: Path to the markdown cheat-sheet
+    std::string migrationDocContent;  // NEW: The actual content loaded at startup
+    
+    std::vector<CodeReplacement> replacements;
+};
+
 struct DependencyChange {
     Dependency oldDep;
     Dependency newDep;
@@ -24,7 +41,7 @@ struct RefactorRequest {
     std::string filePath;
     std::string originalCode;
     DependencyChange changeDetails;
-    std::string customPromptContext;
+    std::string customPromptContext; // We will inject the markdown content here
 };
 
 struct ProjectContext {
@@ -35,7 +52,6 @@ struct ProjectContext {
     std::vector<std::string> sourceFiles; 
 };
 
-// NEW: Commit model to track author contributions
 struct Commit {
     std::string id;
     std::string authorName;
@@ -48,6 +64,6 @@ struct MergeRequest {
     std::string title;
     std::string sourceBranch;
     std::string createdAt; 
-    std::string webUrl;      // NEW: For chat links
-    std::string authorEmail; // NEW: To identify if the bot owns it
+    std::string webUrl;      
+    std::string authorEmail; 
 };

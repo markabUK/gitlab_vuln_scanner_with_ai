@@ -32,6 +32,29 @@ protected:
         return "chore/deps-update-" + ecosystemPrefix + "-" + std::to_string(now);
     }
 
+    std::string GetMigrationContext(const DependencyChange& change) const {
+        for (const auto& m : migrations) {
+            bool groupMatches = m.oldGroup.empty() || m.oldGroup == change.oldDep.group;
+            bool nameMatches = m.oldName.empty() || m.oldName == change.oldDep.name;
+            
+            if (groupMatches && nameMatches && !m.migrationDocContent.empty()) {
+                return m.migrationDocContent;
+            }
+        }
+        return "";
+    }
+
+    std::string BuildCombinedContext(const std::vector<DependencyChange>& relevantChanges) const {
+        std::string combinedContext = "";
+        for (const auto& c : relevantChanges) {
+            std::string doc = GetMigrationContext(c);
+            if (!doc.empty()) {
+                combinedContext += "\n--- API MIGRATION GUIDE FOR " + c.oldDep.name + " ---\n" + doc + "\n";
+            }
+        }
+        return combinedContext;
+    }
+
     void DeduplicateChanges(std::vector<DependencyChange>& changes) const {
         std::vector<DependencyChange> uniqueChanges;
         std::set<std::string> seenKeys;
