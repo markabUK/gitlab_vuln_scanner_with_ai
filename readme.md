@@ -249,116 +249,215 @@ You can override the config location via CLI:
 ./build/GradleDependencyUpdater 122013261 --config="/tmp/custom-settings.json"
 
 
+================================================================================
 Example appsettings.json
-``` JSON
+================================================================================
 
+``` JSON
 {
   "GitLab": {
-    "Host": "[https://gitlab.com](https://gitlab.com)",
-    "Token": "glpat-YOUR_TOKEN"
+    "Host": "https://gitlab.example.com",
+    "Token": "glpat-xxxxxxxxxxxxxxxxxxxx",
+    "BotEmail": "dependency-bot@yourcompany.com"
+  },
+  "Target": {
+    "Type": "Group",
+    "Id": "12345",
+    "ExcludeGroups": [
+      "legacy-archive",
+      "sandbox/experimental"
+    ],
+    "ExcludeProjects": [
+      "9999",
+      "core-team/frozen-service"
+    ]
+  },
+  "Notifications": {
+    "GoogleChatWebhook": "https://chat.googleapis.com/v1/spaces/AAAAxxxxxx/messages?key=AIzaxxxxx&token=xxxxxx"
   },
   "AI": {
-    "Provider": "GEMINI",
-    "GeminiApiKey": "AIzaSy...",
+    "Provider": "OLLAMA",
+    "GeminiApiKey": "",
     "OpenAIApiKey": "",
-    "OllamaEndpoint": "http://localhost:11434/api/generate",
+    "OllamaEndpoint": "http://localhost:11434/api/chat",
     "OllamaModel": "qwen2.5-coder:7b"
   },
   "Registries": [
     {
       "Type": "GitLab",
-      "Url": "[https://gitlab.com/api/v4/projects/44020136/packages/maven](https://gitlab.com/api/v4/projects/44020136/packages/maven)",
-      "Token": "glpat-REGISTRY_READ_TOKEN",
-      "GroupPrefixes": ["uk.co.tpplc"]
+      "Url": "https://gitlab.example.com/api/v4/groups/12345/-/packages/maven",
+      "Token": "glpat-xxxxxxxxxxxxxxxxxxxx",
+      "GroupPrefixes": [
+        "com.yourcompany.internal",
+        "com.yourcompany.shared"
+      ]
     },
     {
       "Type": "MavenCentral",
-      "Url": "[https://repo1.maven.org/maven2](https://repo1.maven.org/maven2)",
+      "Url": "",
       "Token": "",
-      "GroupPrefixes": ["*"] 
+      "GroupPrefixes": [
+        "*"
+      ]
     }
   ],
-  "Migrations": [
-    {
-      "OldGroup": "junit",
-      "OldName": "junit",
-      "NewGroup": "org.junit.jupiter",
-      "NewName": "junit-jupiter-api",
-      "Replacements": [
-        { "Search": "import org.junit.Test;", "Replace": "import org.junit.jupiter.api.Test;" },
-        { "Search": "import org.junit.Before;", "Replace": "import org.junit.jupiter.api.BeforeEach;" },
-        { "Search": "import org.junit.After;", "Replace": "import org.junit.jupiter.api.AfterEach;" },
-        { "Search": "import org.junit.BeforeClass;", "Replace": "import org.junit.jupiter.api.BeforeAll;" },
-        { "Search": "import org.junit.AfterClass;", "Replace": "import org.junit.jupiter.api.AfterAll;" },
-        { "Search": "import org.junit.Ignore;", "Replace": "import org.junit.jupiter.api.Disabled;" },
-        { "Search": "import org.junit.Assert.", "Replace": "import org.junit.jupiter.api.Assertions." },
-        { "Search": "import static org.junit.Assert.", "Replace": "import static org.junit.jupiter.api.Assertions." }
-      ]
-    },
-    {
-      "OldGroup": "org.mockito",
-      "OldName": "mockito-all",
-      "NewGroup": "org.mockito",
-      "NewName": "mockito-core",
-      "Replacements": []
-    },
-    {
-      "OldGroup": "javax.jms",
-      "OldName": "javax.jms-api",
-      "NewGroup": "jakarta.jms",
-      "NewName": "jakarta.jms-api",
-      "Replacements": [
-        { "Search": "import javax.jms", "Replace": "import jakarta.jms" }
-      ]
-    },
-    {
-      "OldGroup": "javax.servlet",
-      "OldName": "javax.servlet-api",
-      "NewGroup": "jakarta.servlet",
-      "NewName": "jakarta.servlet-api",
-      "Replacements": [
-        { "Search": "import javax.servlet", "Replace": "import jakarta.servlet" }
-      ]
-    },
-    {
-      "OldGroup": "javax.annotation",
-      "OldName": "javax.annotation-api",
-      "NewGroup": "jakarta.annotation",
-      "NewName": "jakarta.annotation-api",
-      "Replacements": [
-        { "Search": "import javax.annotation", "Replace": "import jakarta.annotation" }
-      ]
-    },
-    {
-      "OldGroup": "javax.xml.bind",
-      "OldName": "jaxb-api",
-      "NewGroup": "jakarta.xml.bind",
-      "NewName": "jakarta.xml.bind-api",
-      "Replacements": [
-        { "Search": "import javax.xml.bind", "Replace": "import jakarta.xml.bind" }
-      ]
-    },
-    {
-      "OldGroup": "javax.validation",
-      "OldName": "validation-api",
-      "NewGroup": "jakarta.validation",
-      "NewName": "jakarta.validation-api",
-      "Replacements": [
-        { "Search": "import javax.validation", "Replace": "import jakarta.validation" }
-      ]
-    },
-    {
-      "OldGroup": "org.assertj",
-      "OldName": "",
-      "NewGroup": "org.assertj",
-      "NewName": "",
-      "Replacements": [
-        { "Search": "org.assertj.core.api.Java6Assertions", "Replace": "org.assertj.core.api.Assertions" }
-      ]
-    }
-  ]
+  "Migrations": {
+    "Java": [
+      {
+        "OldGroup": "junit",
+        "OldName": "junit",
+        "NewGroup": "org.junit.jupiter",
+        "NewName": "junit-jupiter-api",
+        "MaxOldVersion": "4.99.99",
+        "MinNewVersion": "5.0.0",
+        "MigrationDocPath": "./migrations/junit4-to-junit5.md",
+        "Replacements": [
+          { "Search": "import org.junit.Test;", "Replace": "import org.junit.jupiter.api.Test;" },
+          { "Search": "import org.junit.Before;", "Replace": "import org.junit.jupiter.api.BeforeEach;" },
+          { "Search": "import org.junit.After;", "Replace": "import org.junit.jupiter.api.AfterEach;" },
+          { "Search": "import org.junit.BeforeClass;", "Replace": "import org.junit.jupiter.api.BeforeAll;" },
+          { "Search": "import org.junit.AfterClass;", "Replace": "import org.junit.jupiter.api.AfterAll;" },
+          { "Search": "import org.junit.Ignore;", "Replace": "import org.junit.jupiter.api.Disabled;" },
+          { "Search": "import org.junit.Assert.", "Replace": "import org.junit.jupiter.api.Assertions." },
+          { "Search": "import static org.junit.Assert.", "Replace": "import static org.junit.jupiter.api.Assertions." }
+        ]
+      },
+      {
+        "OldGroup": "javax.servlet",
+        "OldName": "javax.servlet-api",
+        "NewGroup": "jakarta.servlet",
+        "NewName": "jakarta.servlet-api",
+        "MigrationDocPath": "./migrations/javax-to-jakarta.md",
+        "Replacements": [
+          { "Search": "import javax.servlet.", "Replace": "import jakarta.servlet." }
+        ]
+      },
+      {
+        "OldGroup": "io.micronaut",
+        "OldName": "micronaut-core",
+        "MaxOldVersion": "4.99.99",
+        "MinNewVersion": "5.0.0",
+        "MigrationDocPath": "./migrations/micronaut4-to-micronaut5.md",
+        "Replacements": [
+          { "Search": "import io.micronaut.core.annotation.Nullable;", "Replace": "import org.jspecify.annotations.Nullable;" },
+          { "Search": "import io.micronaut.core.annotation.NonNull;", "Replace": "import org.jspecify.annotations.NonNull;" }
+        ]
+      }
+    ],
+    "DotNet": [
+      {
+        "OldGroup": "",
+        "OldName": "Newtonsoft.Json",
+        "NewGroup": "",
+        "NewName": "System.Text.Json",
+        "MigrationDocPath": "./migrations/newtonsoft-to-system-text.md",
+        "Replacements": [
+          { "Search": "using Newtonsoft.Json;", "Replace": "using System.Text.Json;" },
+          { "Search": "using Newtonsoft.Json.Serialization;", "Replace": "using System.Text.Json.Serialization;" }
+        ]
+      }
+    ],
+    "Go": [],
+    "Node": []
+  }
 }
 ```
+
+================================================================================
+README.md SECTION
+================================================================================
+
+## Configuration (`appsettings.json`)
+
+All runtime options, targeting criteria, registry endpoints, AI configurations, and migration rules are controlled via `appsettings.json`. The application looks for this file in the same directory as the executable by default, or via the `--config=/path/to/appsettings.json` CLI argument.
+
+---
+
+### 1. GitLab (`GitLab`)
+Configures repository connectivity and bot identity.
+
+- Host: string (default: "https://gitlab.com")
+  The base URL of your GitLab instance (cloud or self-hosted).
+- Token: string (default: "")
+  GitLab Personal or Project Access Token. Requires api, read_repository, and write_repository scopes.
+- BotEmail: string (default: "bot@...")
+  Email address attributed to automated actions if custom metadata is required.
+
+---
+
+### 2. Target Scope & Filtering (`Target`)
+Controls which repositories the tool scans and refactors.
+
+- Type: string (default: "Group")
+  Can be "Group" (scans all projects under the group ID) or "Project" (executes against a single repository).
+- Id: string (default: "")
+  The numeric ID or URL-encoded path of the target group or project. Can be overridden via CLI argument.
+- ExcludeGroups: array of strings (default: [])
+  List of group names or path prefixes to skip. Any project under these paths will be ignored.
+- ExcludeProjects: array of strings (default: [])
+  List of project IDs or project path names to exclude from processing.
+
+---
+
+### 3. Notifications (`Notifications`)
+Configures proactive webhook alerts when automated runs encounter human interventions.
+
+- GoogleChatWebhook: string
+  Incoming Webhook URL for Google Chat. If an open bot MR contains manual commits from human developers, the bot leaves the MR untouched, skips the project, and fires an alert with MR details to this webhook. Leave empty ("") to disable.
+
+---
+
+### 4. AI Provider Settings (`AI`)
+Configures the code refactoring engine.
+
+- Provider: string (default: "GEMINI")
+  AI backend to use. Options: "OLLAMA", "GEMINI", "OPENAI", or "DUO".
+- GeminiApiKey: string (default: "")
+  API key when Provider is set to "GEMINI".
+- OpenAIApiKey: string (default: "")
+  API key when Provider is set to "OPENAI".
+- OllamaEndpoint: string (default: "http://localhost:11434/api/chat")
+  Full HTTP URL to your Ollama chat endpoint.
+- OllamaModel: string (default: "qwen2.5-coder:7b")
+  Model tag to load inside Ollama (e.g., qwen2.5-coder:7b, deepseek-coder-v2).
+
+* Self-Correction & No-Op Detection:
+  When using "OLLAMA", the adapter monitors for lazy responses. If the model echoes back the unchanged code, the tool triggers a self-correction loop (up to 3 attempts) with targeted warning prompts to enforce code modifications.
+
+---
+
+### 5. Package Registries (`Registries`)
+Controls where the tool checks for newer versions of dependencies.
+
+Each item in the array supports:
+- Type: The registry protocol ("MavenCentral" or "GitLab").
+- Url: Base URL for the registry (e.g., GitLab Package Registry endpoint).
+- Token: Auth token required for private registries.
+- GroupPrefixes: List of package prefixes directed to this registry (e.g., ["com.mycompany.*"]). Use ["*"] for public catch-alls.
+
+---
+
+### 6. Per-Language Migrations (`Migrations`)
+Defines automated upgrade rules split across language ecosystems ("Java", "DotNet", "Go", "Node").
+
+Each entry represents a migration rule:
+
+- OldGroup / OldName:
+  Identifier of the existing dependency. For .NET/Node/Go where groups do not exist, leave OldGroup blank ("") and set OldName to the package ID (e.g., "Newtonsoft.Json").
+- NewGroup / NewName (Optional):
+  Set these only when an artifact is relocated or renamed (e.g., junit:junit -> org.junit.jupiter:junit-jupiter-api). For standard in-place version bumps, omit or leave blank.
+- MaxOldVersion / MinNewVersion (Optional):
+  Semantic version boundaries.
+  - MaxOldVersion: The upper limit of the current project version to qualify for this rule.
+  - MinNewVersion: The minimum target version required to trigger this rule.
+  - Omit both to run the rule unconditionally on any version change.
+- MigrationDocPath (Optional):
+  Path to a curated local Markdown file containing API changes and before/after code examples. Loaded at startup and injected into the AI prompt to bypass LLM knowledge cutoffs.
+- Replacements (Optional):
+  Array of direct text substitutions (Search and Replace). Executed across source files for fast, deterministic namespace and import updates without consuming AI compute.
+
+#### Migration Stacking:
+If a project updates across multiple major versions (e.g., from v3 to v5), defining separate rules with respective version boundaries causes the tool to automatically stack all qualifying migration documents and execute their string replacements sequentially in a single Merge Request.
 
 📦 Multi-Registry & Internal Libraries
 
@@ -366,6 +465,56 @@ The tool utilizes a Composite Registry Router.
 If a dependency in build.gradle matches a GroupPrefix (e.g., uk.co.tpplc), the tool queries the private GitLab registry.
 
 Smart AI Bypassing: When an internal library is bumped, the build.gradle is updated, but the AI refactoring engine is explicitly skipped for that library. This prevents the AI from halluincating APIs for proprietary code it has no knowledge of.
+
+
+## Example migration document:
+
+``` text/plain
+# Micronaut 4 to Micronaut 5 Migration Guide
+
+You are migrating Java/Kotlin code from Micronaut 4 to Micronaut 5.1.x.
+
+### Critical API Changes:
+1. Nullability Annotations: Micronaut 5 formally adopts JSpecify. Replace `javax.annotation.Nullable`, `jakarta.annotation.Nullable`, or `io.micronaut.core.annotation.Nullable` with `org.jspecify.annotations.Nullable` (and similarly for `@NonNull`).
+2. Reactive Streams: RxJava 2 is no longer supported. You must migrate RxJava 2 imports (`io.reactivex.*`) to RxJava 3 (`io.reactivex.rxjava3.core.*`) or Project Reactor (`reactor.core.publisher.*`). Replace `Single<T>` with `Mono<T>` or `io.reactivex.rxjava3.core.Single<T>`.
+3. Micronaut Views: The `@TurboView` annotation has been renamed to `@TurboStreamView`.
+4. Embedded Data: If using embedded fields in Micronaut Data, the embedded naming strategy changed. Ensure fields inside `@Embeddable` classes are correctly mapped if they previously relied on legacy implicit naming.
+
+### Example BEFORE:
+    import io.micronaut.core.annotation.Nullable;
+    import io.micronaut.views.turbo.TurboView;
+    import io.reactivex.Single;
+    import io.micronaut.http.annotation.Get;
+    import io.micronaut.http.annotation.Controller;
+
+    @Controller("/api")
+    public class LegacyController {
+
+        @Get("/view")
+        @TurboView("my-view")
+        public Single<String> renderView(@Nullable String name) {
+            return Single.just(name == null ? "Default" : name);
+        }
+    }
+
+### Example AFTER:
+    import org.jspecify.annotations.Nullable;
+    import io.micronaut.views.turbo.TurboStreamView;
+    import reactor.core.publisher.Mono;
+    import io.micronaut.http.annotation.Get;
+    import io.micronaut.http.annotation.Controller;
+
+    @Controller("/api")
+    public class LegacyController {
+
+        @Get("/view")
+        @TurboStreamView("my-view")
+        public Mono<String> renderView(@Nullable String name) {
+            return Mono.just(name == null ? "Default" : name);
+        }
+    }
+
+```
 
 ## 🤝 Contributing
 

@@ -20,10 +20,13 @@ struct DependencyMigration {
     std::string oldName;
     std::string newGroup;
     std::string newName;
+
+    std::string maxOldVersion; 
+    std::string minNewVersion;
     
-    std::string migrationDocPath;     // NEW: Path to the markdown cheat-sheet
-    std::string migrationDocContent;  // NEW: The actual content loaded at startup
-    
+    std::string migrationDocPath;     
+    std::string migrationDocContent;  
+        
     std::vector<CodeReplacement> replacements;
 };
 
@@ -41,7 +44,7 @@ struct RefactorRequest {
     std::string filePath;
     std::string originalCode;
     DependencyChange changeDetails;
-    std::string customPromptContext; // We will inject the markdown content here
+    std::string customPromptContext;
 };
 
 struct ProjectContext {

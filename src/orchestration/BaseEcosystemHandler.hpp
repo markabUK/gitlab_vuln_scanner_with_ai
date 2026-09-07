@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <set>
+#include <algorithm>
 
 class BaseEcosystemHandler : public IEcosystemHandler {
 protected:
@@ -32,24 +33,54 @@ protected:
         return "chore/deps-update-" + ecosystemPrefix + "-" + std::to_string(now);
     }
 
-    std::string GetMigrationContext(const DependencyChange& change) const {
-        for (const auto& m : migrations) {
-            bool groupMatches = m.oldGroup.empty() || m.oldGroup == change.oldDep.group;
-            bool nameMatches = m.oldName.empty() || m.oldName == change.oldDep.name;
-            
-            if (groupMatches && nameMatches && !m.migrationDocContent.empty()) {
-                return m.migrationDocContent;
+    int CompareVersions(const std::string& v1, const std::string& v2) const {
+        if (v1.empty() || v2.empty()) return 0;
+        
+        auto parse = [](const std::string& v) {
+            std::vector<int> parts;
+            std::stringstream ss(v);
+            std::string item;
+            while (std::getline(ss, item, '.')) {
+                try { parts.push_back(std::stoi(item)); }
+                catch (...) { parts.push_back(0); } // Fallback for alpha/beta string suffixes
             }
+            return parts;
+        };
+        
+        auto p1 = parse(v1);
+        auto p2 = parse(v2);
+        size_t maxLen = std::max(p1.size(), p2.size());
+        
+        for (size_t i = 0; i < maxLen; ++i) {
+            int num1 = i < p1.size() ? p1[i] : 0;
+            int num2 = i < p2.size() ? p2[i] : 0;
+            if (num1 < num2) return -1;
+            if (num1 > num2) return 1;
         }
-        return "";
+        return 0;
+    }
+
+    bool IsMigrationApplicable(const DependencyMigration& m, const DependencyChange& change) const {
+        if (!m.oldGroup.empty() && m.oldGroup != change.oldDep.group) return false;
+        if (!m.oldName.empty() && m.oldName != change.oldDep.name) return false;
+
+        if (!m.maxOldVersion.empty() && CompareVersions(change.oldDep.version, m.maxOldVersion) > 0) {
+            return false; // The project was already on a newer version
+        }
+        if (!m.minNewVersion.empty() && CompareVersions(change.newDep.version, m.minNewVersion) < 0) {
+            return false; // The project isn't upgrading far enough to hit this
+        }
+        
+        return true;
     }
 
     std::string BuildCombinedContext(const std::vector<DependencyChange>& relevantChanges) const {
         std::string combinedContext = "";
         for (const auto& c : relevantChanges) {
-            std::string doc = GetMigrationContext(c);
-            if (!doc.empty()) {
-                combinedContext += "\n--- API MIGRATION GUIDE FOR " + c.oldDep.name + " ---\n" + doc + "\n";
+            for (const auto& m : migrations) {
+                if (IsMigrationApplicable(m, c) && !m.migrationDocContent.empty()) {
+                    combinedContext += "\n--- API MIGRATION GUIDE FOR " + c.oldDep.name + " ---\n" + m.migrationDocContent + "\n";
+                }
             }
         }
         return combinedContext;
@@ -72,8 +103,7 @@ protected:
     std::string PostProcessCode(std::string code, const std::vector<DependencyChange>& changes) const {
         for (const auto& change : changes) {
             for (const auto& migration : migrations) {
-                if (change.oldDep.group == migration.oldGroup &&
-                    (migration.oldName.empty() || change.oldDep.name == migration.oldName)) {
+                if (IsMigrationApplicable(migration, change)) {
                     for (const auto& rep : migration.replacements) {
                         code = StringUtils::ReplaceAll(code, rep.search, rep.replace); 
                     }

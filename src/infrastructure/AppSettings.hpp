@@ -44,7 +44,6 @@ public:
     TargetConfig target;
     std::vector<RegistryConfig> registries;
     
-    // UPDATED: Now maps Ecosystem Name to its specific migrations
     std::map<std::string, std::vector<DependencyMigration>> migrations;
 
     static AppSettings Load(const std::string& configPath) {
@@ -101,7 +100,6 @@ public:
             }
         }
 
-        // UPDATED: Iterate over language keys in the Migrations object
         if (j.contains("Migrations")) {
             for (auto it = j["Migrations"].begin(); it != j["Migrations"].end(); ++it) {
                 std::string ecosystem = it.key();
@@ -112,6 +110,9 @@ public:
                     dm.oldName = mJson.value("OldName", "");
                     dm.newGroup = mJson.value("NewGroup", "");
                     dm.newName = mJson.value("NewName", "");
+                    
+                    dm.maxOldVersion = mJson.value("MaxOldVersion", "");
+                    dm.minNewVersion = mJson.value("MinNewVersion", "");
                     
                     dm.migrationDocPath = mJson.value("MigrationDocPath", "");
                     if (!dm.migrationDocPath.empty()) {
@@ -133,7 +134,6 @@ public:
                             dm.replacements.push_back(cr);
                         }
                     }
-                    // Assign to the specific ecosystem bucket
                     settings.migrations[ecosystem].push_back(dm);
                 }
             }
