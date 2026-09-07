@@ -3,6 +3,7 @@
 #include "../domain/Models.hpp"
 #include <string>
 #include <vector>
+#include <map>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -42,7 +43,9 @@ public:
     
     TargetConfig target;
     std::vector<RegistryConfig> registries;
-    std::vector<DependencyMigration> migrations;
+    
+    // UPDATED: Now maps Ecosystem Name to its specific migrations
+    std::map<std::string, std::vector<DependencyMigration>> migrations;
 
     static AppSettings Load(const std::string& configPath) {
         if (!std::filesystem::exists(configPath)) {
@@ -98,35 +101,41 @@ public:
             }
         }
 
+        // UPDATED: Iterate over language keys in the Migrations object
         if (j.contains("Migrations")) {
-            for (const auto& mJson : j["Migrations"]) {
-                DependencyMigration dm;
-                dm.oldGroup = mJson.value("OldGroup", "");
-                dm.oldName = mJson.value("OldName", "");
-                dm.newGroup = mJson.value("NewGroup", "");
-                dm.newName = mJson.value("NewName", "");
+            for (auto it = j["Migrations"].begin(); it != j["Migrations"].end(); ++it) {
+                std::string ecosystem = it.key();
                 
-                dm.migrationDocPath = mJson.value("MigrationDocPath", "");
-                if (!dm.migrationDocPath.empty()) {
-                    if (std::filesystem::exists(dm.migrationDocPath)) {
-                        std::ifstream docFile(dm.migrationDocPath);
-                        std::stringstream buffer;
-                        buffer << docFile.rdbuf();
-                        dm.migrationDocContent = buffer.str();
-                    } else {
-                        std::cerr << "Warning: MigrationDocPath not found: " << dm.migrationDocPath << "\n";
+                for (const auto& mJson : it.value()) {
+                    DependencyMigration dm;
+                    dm.oldGroup = mJson.value("OldGroup", "");
+                    dm.oldName = mJson.value("OldName", "");
+                    dm.newGroup = mJson.value("NewGroup", "");
+                    dm.newName = mJson.value("NewName", "");
+                    
+                    dm.migrationDocPath = mJson.value("MigrationDocPath", "");
+                    if (!dm.migrationDocPath.empty()) {
+                        if (std::filesystem::exists(dm.migrationDocPath)) {
+                            std::ifstream docFile(dm.migrationDocPath);
+                            std::stringstream buffer;
+                            buffer << docFile.rdbuf();
+                            dm.migrationDocContent = buffer.str();
+                        } else {
+                            std::cerr << "Warning: MigrationDocPath not found: " << dm.migrationDocPath << "\n";
+                        }
                     }
-                }
-                
-                if (mJson.contains("Replacements")) {
-                    for (const auto& repJson : mJson["Replacements"]) {
-                        CodeReplacement cr;
-                        cr.search = repJson.value("Search", "");
-                        cr.replace = repJson.value("Replace", "");
-                        dm.replacements.push_back(cr);
+                    
+                    if (mJson.contains("Replacements")) {
+                        for (const auto& repJson : mJson["Replacements"]) {
+                            CodeReplacement cr;
+                            cr.search = repJson.value("Search", "");
+                            cr.replace = repJson.value("Replace", "");
+                            dm.replacements.push_back(cr);
+                        }
                     }
+                    // Assign to the specific ecosystem bucket
+                    settings.migrations[ecosystem].push_back(dm);
                 }
-                settings.migrations.push_back(dm);
             }
         }
 

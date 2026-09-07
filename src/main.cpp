@@ -105,7 +105,8 @@ int main(int argc, char* argv[]) {
             );
         } else {
             mavenRegistryRouter->AddRegistry(
-                std::make_shared<MavenCentralRegistry>(settings.migrations),
+                // UPDATED: Pass only Java migrations to the Maven registry
+                std::make_shared<MavenCentralRegistry>(settings.migrations["Java"]), 
                 regConfig.groupPrefixes
             );
         }
@@ -138,6 +139,7 @@ int main(int argc, char* argv[]) {
         gitlabClient = std::make_shared<DryRunGitLabClient>(gitlabClient);
         
         if (isOffline) {
+            std::cout << "    AI OFFLINE MODE ACTIVATED  \n";
             aiAssistant = std::make_shared<DryRunAICodeAssistant>(); 
         }
         std::cout << "============================================\n\n";
@@ -148,17 +150,18 @@ int main(int argc, char* argv[]) {
     // --- 6. Wire up Ecosystem Handlers ---
     std::vector<std::shared_ptr<IEcosystemHandler>> handlers;
     
+    // UPDATED: Pass specific ecosystem migrations to each handler
     handlers.push_back(std::make_shared<JavaHandler>(
-        gitlabClient, aiAssistant, gradleParser, pomParser, antParser, mavenRegistryRouter, settings.migrations));
+        gitlabClient, aiAssistant, gradleParser, pomParser, antParser, mavenRegistryRouter, settings.migrations["Java"]));
         
     handlers.push_back(std::make_shared<DotNetHandler>(
-        gitlabClient, aiAssistant, dotnetParser, nugetRegistry, settings.migrations));
+        gitlabClient, aiAssistant, dotnetParser, nugetRegistry, settings.migrations["DotNet"]));
         
     handlers.push_back(std::make_shared<GoHandler>(
-        gitlabClient, aiAssistant, goParser, goRegistry, settings.migrations));
+        gitlabClient, aiAssistant, goParser, goRegistry, settings.migrations["Go"]));
         
     handlers.push_back(std::make_shared<NodeHandler>(
-        gitlabClient, aiAssistant, npmParser, npmRegistry, settings.migrations));
+        gitlabClient, aiAssistant, npmParser, npmRegistry, settings.migrations["Node"]));
 
     // --- 7. Run Orchestrator ---
     // UPDATED: Removed botEmail from injection
