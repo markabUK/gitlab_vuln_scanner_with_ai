@@ -17,7 +17,7 @@ public:
             cprHeaders.insert({key, value});
         }
         
-        auto r = cpr::Get(cpr::Url{url}, cprHeaders, cpr::Timeout{30000});
+        auto r = cpr::Get(cpr::Url{url}, cprHeaders, cpr::Timeout{600000});
         return {static_cast<int>(r.status_code), r.text};
     }
 
@@ -27,7 +27,7 @@ public:
             cprHeaders.insert({key, value});
         }
         
-        auto r = cpr::Post(cpr::Url{url}, cpr::Body{payload}, cprHeaders, cpr::Timeout{120000});
+        auto r = cpr::Post(cpr::Url{url}, cpr::Body{payload}, cprHeaders, cpr::Timeout{600000});
         return {static_cast<int>(r.status_code), r.text};
     }
 
@@ -37,7 +37,7 @@ public:
             cprHeaders.insert({key, value});
         }
         
-        auto r = cpr::Put(cpr::Url{url}, cpr::Body{payload}, cprHeaders, cpr::Timeout{30000});
+        auto r = cpr::Put(cpr::Url{url}, cpr::Body{payload}, cprHeaders, cpr::Timeout{600000});
         return {static_cast<int>(r.status_code), r.text};
     }
 
@@ -47,7 +47,7 @@ public:
             cprHeaders.insert({key, value});
         }
         
-        auto r = cpr::Delete(cpr::Url{url}, cprHeaders, cpr::Timeout{30000});
+        auto r = cpr::Delete(cpr::Url{url}, cprHeaders, cpr::Timeout{600000});
         return {static_cast<int>(r.status_code), r.text};
     }
 };
