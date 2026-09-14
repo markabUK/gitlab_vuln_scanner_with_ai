@@ -11,6 +11,7 @@
 #include <string>
 #include <set>
 #include <algorithm>
+#include <map>
 
 class BaseEcosystemHandler : public IEcosystemHandler {
 protected:
@@ -27,6 +28,10 @@ public:
 
     virtual ~BaseEcosystemHandler() = default;
 
+    virtual std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const override {
+        return {}; 
+    }
+
 protected:
     std::string GenerateBranchName(const std::string& ecosystemPrefix) const {
         auto now = std::chrono::system_clock::now().time_since_epoch().count();
@@ -42,7 +47,7 @@ protected:
             std::string item;
             while (std::getline(ss, item, '.')) {
                 try { parts.push_back(std::stoi(item)); }
-                catch (...) { parts.push_back(0); } // Fallback for alpha/beta string suffixes
+                catch (...) { parts.push_back(0); } 
             }
             return parts;
         };
@@ -65,10 +70,10 @@ protected:
         if (!m.oldName.empty() && m.oldName != change.oldDep.name) return false;
 
         if (!m.maxOldVersion.empty() && CompareVersions(change.oldDep.version, m.maxOldVersion) > 0) {
-            return false; // The project was already on a newer version
+            return false;
         }
         if (!m.minNewVersion.empty() && CompareVersions(change.newDep.version, m.minNewVersion) < 0) {
-            return false; // The project isn't upgrading far enough to hit this
+            return false;
         }
         
         return true;

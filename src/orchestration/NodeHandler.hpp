@@ -1,6 +1,11 @@
 #pragma once
 
 #include "BaseEcosystemHandler.hpp"
+#include <filesystem>
+#include <fstream>
+#include <cstdlib>
+#include <chrono>
+#include <map>
 
 class NodeHandler : public BaseEcosystemHandler {
 private:
@@ -30,6 +35,45 @@ public:
         return {"package.json", ".js", ".ts", ".jsx", ".tsx"};
     }
 
+    std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const override {
+        std::map<std::string, std::string> lockfiles;
+        
+        for (const auto& [filePath, newContent] : modifiedBuildFiles) {
+            if (filePath.find("package.json") != std::string::npos) {
+                std::string tmpDir = "/tmp/deps_bot_node_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+                std::filesystem::create_directories(tmpDir);
+
+                std::ofstream outJson(tmpDir + "/package.json");
+                outJson << newContent;
+                outJson.close();
+
+                std::cout << "  [Node] Generating package-lock.json locally...\n";
+                std::string cmd = "cd " + tmpDir + " && npm install --package-lock-only --ignore-scripts > /dev/null 2>&1";
+                int result = std::system(cmd.c_str());
+
+                if (result == 0 && std::filesystem::exists(tmpDir + "/package-lock.json")) {
+                    std::ifstream lockFile(tmpDir + "/package-lock.json");
+                    std::stringstream buffer;
+                    buffer << lockFile.rdbuf();
+                    
+                    std::string lockfilePath = filePath;
+                    size_t pos = lockfilePath.rfind("package.json");
+                    if (pos != std::string::npos) {
+                        lockfilePath.replace(pos, 12, "package-lock.json");
+                    } else {
+                        lockfilePath = "package-lock.json";
+                    }
+                    lockfiles[lockfilePath] = buffer.str();
+                } else {
+                    std::cerr << "  [Node Error] Failed to generate package-lock.json.\n";
+                }
+
+                std::filesystem::remove_all(tmpDir);
+            }
+        }
+        return lockfiles;
+    }
+
     void Process(const ProjectContext& project, const std::vector<std::string>& repoFiles) override {
         std::vector<std::string> pkgFiles, sourceFiles;
         
@@ -45,6 +89,7 @@ public:
 
         std::vector<DependencyChange> masterChanges;
         std::vector<std::string> modifiedBuildFiles;
+        std::map<std::string, std::string> pendingLockfileTargets;
         
         std::string branchName = GenerateBranchName("node");
         bool branchCreated = false;
@@ -77,12 +122,20 @@ public:
                 }
                 gitlab->CommitFile(project.projectId, branchName, pkgFilePath, updatedContent, "chore: Update Node dependencies in " + pkgFilePath);
                 modifiedBuildFiles.push_back(pkgFilePath);
+                pendingLockfileTargets[pkgFilePath] = updatedContent;
             }
         }
 
         if (masterChanges.empty() || !branchCreated) return;
         DeduplicateChanges(masterChanges);
         
+        // Generate and commit lockfiles
+        auto generatedLockfiles = GenerateLockfiles(pendingLockfileTargets);
+        for (const auto& [lockPath, lockContent] : generatedLockfiles) {
+            gitlab->CommitFile(project.projectId, branchName, lockPath, lockContent, "chore: Sync package-lock.json");
+            modifiedBuildFiles.push_back(lockPath);
+        }
+
         std::vector<std::string> modifiedSourceFiles;
 
         for (const auto& filePath : sourceFiles) {
@@ -110,7 +163,7 @@ public:
             combinedChange.releaseNotes = combinedNotes;
 
             std::cout << " -> AI analyzing Node file " << filePath << "...\n";
-            RefactorRequest req = {filePath, baseCode, combinedChange, ""};
+            RefactorRequest req = {filePath, baseCode, combinedChange, BuildCombinedContext(relevantChanges)};
             std::string rawAiCode = ai->RefactorCode(req);
             
             std::string workingCode = StringUtils::CleanAIOutput(rawAiCode, baseCode);

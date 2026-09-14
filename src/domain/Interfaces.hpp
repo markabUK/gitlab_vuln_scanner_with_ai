@@ -5,6 +5,7 @@
 #include <optional>
 #include <vector>
 #include <string>
+#include <map>
 
 // ==========================================
 // 1. Gradle Parser Interface
@@ -50,7 +51,6 @@ public:
     virtual void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) = 0;
     virtual std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) = 0;
     
-    // NEW: Fetch commits for a specific MR
     virtual std::vector<Commit> GetMergeRequestCommits(const std::string& projectId, const std::string& mrIid) = 0;
     
     virtual void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) = 0;
@@ -148,11 +148,13 @@ public:
     virtual ~IEcosystemHandler() = default;
     virtual std::string GetEcosystemName() const = 0;
     virtual std::vector<std::string> GetTargetExtensions() const = 0;
+    
     virtual void Process(const ProjectContext& project, const std::vector<std::string>& repoFiles) = 0;
+    virtual std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const = 0;
 };
 
 // ==========================================
-// 14. Notification Client Interface (NEW)
+// 14. Notification Client Interface
 // ==========================================
 class INotificationClient {
 public:
