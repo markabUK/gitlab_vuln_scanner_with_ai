@@ -280,7 +280,9 @@ Example appsettings.json
     "GeminiApiKey": "",
     "OpenAIApiKey": "",
     "OllamaEndpoint": "http://localhost:11434/api/chat",
-    "OllamaModel": "qwen2.5-coder:7b"
+    "OllamaModel": "qwen3.5:9b",
+    "OllamaContextLength": 32768,
+    "OllamaOutputLength": 16384
   },
   "Registries": [
     {
