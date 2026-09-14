@@ -2,7 +2,7 @@
 
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/HttpClient.hpp"
-#include "../infrastructure/StringUtils.hpp" // <-- Include shared utility
+#include "../infrastructure/AiRetryStrategy.hpp"
 #include <nlohmann/json.hpp>
 #include <iostream>
 
@@ -18,46 +18,42 @@ public:
     std::string GetProviderName() const override { return "OpenAI (GPT-4)"; }
 
     std::string RefactorCode(const RefactorRequest& request) override {
-        std::string prompt = 
-            "You are an expert Java/Kotlin developer. A dependency was updated:\n"
+        std::string basePrompt = 
+            "You are an expert developer. A dependency was updated:\n"
             "From: " + request.changeDetails.oldDep.group + ":" + request.changeDetails.oldDep.name + " (" + request.changeDetails.oldDep.version + ")\n"
             "To: " + request.changeDetails.newDep.group + ":" + request.changeDetails.newDep.name + " (" + request.changeDetails.newDep.version + ")\n"
             "Release Notes/Moves: " + request.changeDetails.releaseNotes + "\n\n"
-            "Refactor the following file to be compatible with the new version. "
-            "Output ONLY the refactored code without Markdown blocks or explanations.\n\n" +
+            "Refactor the following file. Output ONLY the refactored code without Markdown blocks.\n\n" +
             request.originalCode;
-
-        json payload = {
-            {"model", "gpt-4o"},
-            {"messages", {{{"role", "user"}, {"content", prompt}}}},
-            {"temperature", 0.0} // Keep it deterministic for code
-        };
 
         std::map<std::string, std::string> headers = {
             {"Authorization", "Bearer " + apiKey},
             {"Content-Type", "application/json"}
         };
 
-        auto response = HttpClient::Post("https://api.openai.com/v1/chat/completions", payload.dump(), headers);
-
-        if (response.statusCode == 200) {
-            try {
-                auto jsonResp = json::parse(response.body);
-                std::string rawAiResponse = jsonResp["choices"][0]["message"]["content"].get<std::string>();
-                
-                // <-- Use centralized cleaner
-                return StringUtils::CleanAIOutput(rawAiResponse, request.originalCode); 
-            } catch (const std::exception& e) {
-                std::cerr << "[AI ERROR] Failed to parse OpenAI response: " << e.what() << "\n";
-                return request.originalCode;
+        return AiRetryStrategy::Execute(3, 2000, request.originalCode, [&](int attempt, bool isRetry) {
+            std::string prompt = basePrompt;
+            if (isRetry) {
+                prompt += "\n\nCRITICAL WARNING: Previous attempt returned unchanged code. Apply the updates.";
             }
-        }
-        
-        std::cerr << "OpenAI API failed: " << response.body << "\n";
-        return request.originalCode; // Fallback to original code on failure
+
+            json payload = {
+                {"model", "gpt-4o"},
+                {"messages", {{{"role", "user"}, {"content", prompt}}}},
+                {"temperature", 0.0} 
+            };
+
+            auto response = HttpClient::Post("https://api.openai.com/v1/chat/completions", payload.dump(), headers);
+
+            if (response.statusCode == 200) {
+                auto jsonResp = json::parse(response.body);
+                return jsonResp["choices"][0]["message"]["content"].get<std::string>();
+            }
+            return std::string(""); // Trigger retry on HTTP failure
+        });
     }
 
-    std::string GenerateMergeRequestDescription(const std::vector<DependencyChange>& appliedChanges) override {
-        return "Automatically generated MR updating " + std::to_string(appliedChanges.size()) + " dependencies.";
+    std::string GenerateMergeRequestDescription(const std::vector<DependencyChange>&) override {
+        return "Automated dependency updates via OpenAI API.";
     }
 };

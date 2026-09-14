@@ -2,11 +2,10 @@
 
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/HttpClient.hpp"
+#include "../infrastructure/AiRetryStrategy.hpp"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <string>
-#include <map>
-#include <vector>
 
 using json = nlohmann::json;
 
@@ -23,33 +22,22 @@ public:
     std::string GetProviderName() const override { return "Ollama (" + model + ")"; }
 
     std::string RefactorCode(const RefactorRequest& request) override {
-        int maxRetries = 3;
-        int attempt = 1;
-        bool isRetry = false;
-
         std::string systemInstructions = 
-            "You are an automated, stateless code migration tool. "
-            "Your ONLY task is to refactor the provided code to match the dependency update rules. "
-            "You must rewrite the code completely, replacing all old library calls with the new ones. "
-            "Never return the code unchanged. Do not include markdown code blocks or conversational explanations. "
-            "Output ONLY the raw source code.";
+            "You are an automated code migration tool. "
+            "You must rewrite the code replacing old library calls with new ones. "
+            "Never return the code unchanged. Output ONLY raw source code.";
 
         std::map<std::string, std::string> headers = {{"Content-Type", "application/json"}};
 
-        while (attempt <= maxRetries) {
-            std::string userPrompt = 
-                "DEPENDENCY UPDATE RELEASE NOTES & MIGRATION RULES:\n" + request.changeDetails.releaseNotes + "\n\n";
-
-                if (!request.customPromptContext.empty()) {
-                userPrompt += "API MIGRATION CHEAT SHEET:\n" + request.customPromptContext + "\n\n";
-            }
+        return AiRetryStrategy::Execute(3, 1000, request.originalCode, [&](int attempt, bool isRetry) {
+            std::string userPrompt = "RELEASE NOTES:\n" + request.changeDetails.releaseNotes + "\n\n";
+            if (!request.customPromptContext.empty()) userPrompt += "CHEAT SHEET:\n" + request.customPromptContext + "\n\n";
 
             if (isRetry) {
-                userPrompt += "CRITICAL SYSTEM WARNING: In your previous attempt, you returned the exact original code without applying the migration. "
-                              "You MUST find the outdated dependencies/APIs and rewrite them according to the rules above. DO NOT return the original code unchanged.\n\n";
+                userPrompt += "CRITICAL SYSTEM WARNING: In your previous attempt, you returned the exact original code. "
+                              "You MUST find the outdated APIs and rewrite them. DO NOT return the original code unchanged.\n\n";
             }
-
-            userPrompt += "ORIGINAL CODE TO REFACTOR:\n" + request.originalCode;
+            userPrompt += "ORIGINAL CODE:\n" + request.originalCode;
 
             json payload = {
                 {"model", model},
@@ -58,49 +46,17 @@ public:
                     {{"role", "user"}, {"content", userPrompt}}
                 })},
                 {"stream", false},
-                {"options", {
-                    {"temperature", 0.0},     
-                    {"num_ctx", 8192}        
-                }}
+                {"options", { {"temperature", 0.0}, {"num_ctx", 8192} }}
             };
 
             auto res = HttpClient::Post(endpoint, payload.dump(), headers);
 
-            if (res.statusCode != 200) {
-                std::cerr << "[AI ERROR] Ollama call failed (Status " << res.statusCode << "): " << res.body << "\n";
-                return request.originalCode;
-            }
-
-            try {
+            if (res.statusCode == 200) {
                 auto data = json::parse(res.body);
-                std::string rawOutput = data["message"]["content"].get<std::string>();
-
-                std::string cleanedCode = rawOutput;
-                if (cleanedCode.substr(0, 3) == "```") {
-                    size_t start = cleanedCode.find('\n');
-                    size_t end = cleanedCode.rfind("```");
-                    if (start != std::string::npos && end != std::string::npos && end > start) {
-                        cleanedCode = cleanedCode.substr(start + 1, end - start - 1);
-                    }
-                }
-
-                if (cleanedCode != request.originalCode && !cleanedCode.empty()) {
-                    return cleanedCode; // Success!
-                }
-
-                std::cout << "  [Ollama Retry] Model returned unchanged code. Forcing a retry (" << attempt << "/" << maxRetries << ")...\n";
-                isRetry = true;
-                attempt++;
-
-            } catch (const std::exception& e) {
-                std::cerr << "[AI ERROR] Failed to parse Ollama response: " << e.what() << "\n"
-                          << "Full response: " << res.body << "\n";
-                return request.originalCode;
+                return data["message"]["content"].get<std::string>();
             }
-        }
-
-        std::cout << "  [Ollama Warning] Model failed to modify the file after " << maxRetries << " attempts. Leaving file unchanged.\n";
-        return request.originalCode;
+            return std::string(""); // Trigger retry on HTTP failure
+        });
     }
 
     std::string GenerateMergeRequestDescription(const std::vector<DependencyChange>&) override {

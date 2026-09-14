@@ -4,7 +4,6 @@
 
 class StringUtils {
 public:
-    // Replaces all occurrences of a substring with a new string
     static std::string ReplaceAll(std::string str, const std::string& from, const std::string& to) {
         if (from.empty()) return str;
         size_t start_pos = 0;
@@ -15,7 +14,6 @@ public:
         return str;
     }
 
-    // Strips conversational text and markdown blocks (```java ... ```) from AI output
     static std::string CleanAIOutput(std::string code, const std::string& baseCode = "") {
         size_t startTick = code.find("```");
         if (startTick != std::string::npos) {

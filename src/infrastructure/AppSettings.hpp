@@ -57,18 +57,39 @@ public:
 
         AppSettings settings;
 
-        settings.gitlabHost = j.value("GitLab", json::object()).value("Host", "https://gitlab.com");
-        settings.gitlabToken = j.value("GitLab", json::object()).value("Token", "");
-        settings.botEmail = j.value("GitLab", json::object()).value("BotEmail", "bot@dependencyupdater.local");
+        ParseGitLab(j, settings);
+        ParseAI(j, settings);
+        ParseNotifications(j, settings);
+        ParseTarget(j, settings);
+        ParseRegistries(j, settings);
+        ParseMigrations(j, settings);
 
-        settings.aiProvider = j.value("AI", json::object()).value("Provider", "GEMINI");
-        settings.geminiApiKey = j.value("AI", json::object()).value("GeminiApiKey", "");
-        settings.openAiApiKey = j.value("AI", json::object()).value("OpenAIApiKey", "");
-        settings.ollamaEndpoint = j.value("AI", json::object()).value("OllamaEndpoint", "http://localhost:11434/api/generate");
-        settings.ollamaModel = j.value("AI", json::object()).value("OllamaModel", "qwen2.5-coder:7b");
+        return settings;
+    }
 
-        settings.googleChatWebhook = j.value("Notifications", json::object()).value("GoogleChatWebhook", "");
+private:
+    static void ParseGitLab(const json& j, AppSettings& settings) {
+        json glJson = j.value("GitLab", json::object());
+        settings.gitlabHost = glJson.value("Host", "https://gitlab.com");
+        settings.gitlabToken = glJson.value("Token", "");
+        settings.botEmail = glJson.value("BotEmail", "bot@dependencyupdater.local");
+    }
 
+    static void ParseAI(const json& j, AppSettings& settings) {
+        json aiJson = j.value("AI", json::object());
+        settings.aiProvider = aiJson.value("Provider", "GEMINI");
+        settings.geminiApiKey = aiJson.value("GeminiApiKey", "");
+        settings.openAiApiKey = aiJson.value("OpenAIApiKey", "");
+        settings.ollamaEndpoint = aiJson.value("OllamaEndpoint", "http://localhost:11434/api/generate");
+        settings.ollamaModel = aiJson.value("OllamaModel", "qwen2.5-coder:7b");
+    }
+
+    static void ParseNotifications(const json& j, AppSettings& settings) {
+        json notifJson = j.value("Notifications", json::object());
+        settings.googleChatWebhook = notifJson.value("GoogleChatWebhook", "");
+    }
+
+    static void ParseTarget(const json& j, AppSettings& settings) {
         json targetJson = j.value("Target", json::object());
         settings.target.type = targetJson.value("Type", "Group");
         settings.target.id = targetJson.value("Id", "");
@@ -84,61 +105,63 @@ public:
                 settings.target.excludeProjects.push_back(ep.get<std::string>());
             }
         }
+    }
 
-        if (j.contains("Registries")) {
-            for (const auto& regJson : j["Registries"]) {
-                RegistryConfig reg;
-                reg.type = regJson.value("Type", "MavenCentral");
-                reg.url = regJson.value("Url", "");
-                reg.token = regJson.value("Token", "");
-                if (regJson.contains("GroupPrefixes")) {
-                    for (const auto& prefix : regJson["GroupPrefixes"]) {
-                        reg.groupPrefixes.push_back(prefix.get<std::string>());
-                    }
+    static void ParseRegistries(const json& j, AppSettings& settings) {
+        if (!j.contains("Registries")) return;
+
+        for (const auto& regJson : j["Registries"]) {
+            RegistryConfig reg;
+            reg.type = regJson.value("Type", "MavenCentral");
+            reg.url = regJson.value("Url", "");
+            reg.token = regJson.value("Token", "");
+            if (regJson.contains("GroupPrefixes")) {
+                for (const auto& prefix : regJson["GroupPrefixes"]) {
+                    reg.groupPrefixes.push_back(prefix.get<std::string>());
                 }
-                settings.registries.push_back(reg);
             }
+            settings.registries.push_back(reg);
         }
+    }
 
-        if (j.contains("Migrations")) {
-            for (auto it = j["Migrations"].begin(); it != j["Migrations"].end(); ++it) {
-                std::string ecosystem = it.key();
+    static void ParseMigrations(const json& j, AppSettings& settings) {
+        if (!j.contains("Migrations")) return;
+
+        for (auto it = j["Migrations"].begin(); it != j["Migrations"].end(); ++it) {
+            std::string ecosystem = it.key();
+            
+            for (const auto& mJson : it.value()) {
+                DependencyMigration dm;
+                dm.oldGroup = mJson.value("OldGroup", "");
+                dm.oldName = mJson.value("OldName", "");
+                dm.newGroup = mJson.value("NewGroup", "");
+                dm.newName = mJson.value("NewName", "");
                 
-                for (const auto& mJson : it.value()) {
-                    DependencyMigration dm;
-                    dm.oldGroup = mJson.value("OldGroup", "");
-                    dm.oldName = mJson.value("OldName", "");
-                    dm.newGroup = mJson.value("NewGroup", "");
-                    dm.newName = mJson.value("NewName", "");
-                    
-                    dm.maxOldVersion = mJson.value("MaxOldVersion", "");
-                    dm.minNewVersion = mJson.value("MinNewVersion", "");
-                    
-                    dm.migrationDocPath = mJson.value("MigrationDocPath", "");
-                    if (!dm.migrationDocPath.empty()) {
-                        if (std::filesystem::exists(dm.migrationDocPath)) {
-                            std::ifstream docFile(dm.migrationDocPath);
-                            std::stringstream buffer;
-                            buffer << docFile.rdbuf();
-                            dm.migrationDocContent = buffer.str();
-                        } else {
-                            std::cerr << "Warning: MigrationDocPath not found: " << dm.migrationDocPath << "\n";
-                        }
+                dm.maxOldVersion = mJson.value("MaxOldVersion", "");
+                dm.minNewVersion = mJson.value("MinNewVersion", "");
+                
+                dm.migrationDocPath = mJson.value("MigrationDocPath", "");
+                if (!dm.migrationDocPath.empty()) {
+                    if (std::filesystem::exists(dm.migrationDocPath)) {
+                        std::ifstream docFile(dm.migrationDocPath);
+                        std::stringstream buffer;
+                        buffer << docFile.rdbuf();
+                        dm.migrationDocContent = buffer.str();
+                    } else {
+                        std::cerr << "Warning: MigrationDocPath not found: " << dm.migrationDocPath << "\n";
                     }
-                    
-                    if (mJson.contains("Replacements")) {
-                        for (const auto& repJson : mJson["Replacements"]) {
-                            CodeReplacement cr;
-                            cr.search = repJson.value("Search", "");
-                            cr.replace = repJson.value("Replace", "");
-                            dm.replacements.push_back(cr);
-                        }
-                    }
-                    settings.migrations[ecosystem].push_back(dm);
                 }
+                
+                if (mJson.contains("Replacements")) {
+                    for (const auto& repJson : mJson["Replacements"]) {
+                        CodeReplacement cr;
+                        cr.search = repJson.value("Search", "");
+                        cr.replace = repJson.value("Replace", "");
+                        dm.replacements.push_back(cr);
+                    }
+                }
+                settings.migrations[ecosystem].push_back(dm);
             }
         }
-
-        return settings;
     }
 };

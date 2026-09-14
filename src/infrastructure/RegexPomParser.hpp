@@ -48,14 +48,12 @@ public:
         std::string safeArtifact = EscapeRegex(oldDep.name);
         std::string safeOldVer = EscapeRegex(oldDep.version);
 
-        // Target the specific block to avoid modifying sibling dependencies that might share the same version variable
         std::regex targetPattern(
             "(<dependency>\\s*<groupId>\\s*" + safeGroup + "\\s*</groupId>\\s*" +
             "<artifactId>\\s*" + safeArtifact + "\\s*</artifactId>\\s*" +
             "<version>\\s*)" + safeOldVer + "(\\s*</version>\\s*</dependency>)"
         );
 
-        // Replace only the version portion ($1 captures everything before the version, $2 everything after)
         return std::regex_replace(pomContent, targetPattern, "$1" + newDep.version + "$2");
     }
 };

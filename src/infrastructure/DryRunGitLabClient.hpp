@@ -61,7 +61,6 @@ public:
         return realClient->GetOpenMergeRequests(projectId); // Safe to read
     }
 
-    // NEW: Passthrough for GetMergeRequestCommits
     std::vector<Commit> GetMergeRequestCommits(const std::string& projectId, const std::string& mrIid) override {
         return realClient->GetMergeRequestCommits(projectId, mrIid); // Safe to read
     }

@@ -13,70 +13,17 @@ private:
     std::shared_ptr<INpmRegistry> registry;
 
     bool FileImportsDependency(const std::string& code, const DependencyChange& change) const {
-        // Node typically imports packages using require('pkg-name') or import from 'pkg-name'
         return code.find(change.oldDep.name) != std::string::npos;
     }
 
-public:
-    NodeHandler(
-        std::shared_ptr<IGitLabClient> glClient,
-        std::shared_ptr<IAICodeAssistant> aiAssistant,
-        std::shared_ptr<INpmParser> npmParser,
-        std::shared_ptr<INpmRegistry> npmRegistry,
-        const std::vector<DependencyMigration>& migrations)
-        : BaseEcosystemHandler(glClient, aiAssistant, migrations), 
-          parser(npmParser), registry(npmRegistry) {}
-
-    std::string GetEcosystemName() const override {
-        return "Node.js (JS/TS)";
-    }
-
-    std::vector<std::string> GetTargetExtensions() const override {
-        return {"package.json", ".js", ".ts", ".jsx", ".tsx"};
-    }
-
-    std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const override {
-        std::map<std::string, std::string> lockfiles;
-        
-        for (const auto& [filePath, newContent] : modifiedBuildFiles) {
-            if (filePath.find("package.json") != std::string::npos) {
-                std::string tmpDir = "/tmp/deps_bot_node_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
-                std::filesystem::create_directories(tmpDir);
-
-                std::ofstream outJson(tmpDir + "/package.json");
-                outJson << newContent;
-                outJson.close();
-
-                std::cout << "  [Node] Generating package-lock.json locally...\n";
-                std::string cmd = "cd " + tmpDir + " && npm install --package-lock-only --ignore-scripts > /dev/null 2>&1";
-                int result = std::system(cmd.c_str());
-
-                if (result == 0 && std::filesystem::exists(tmpDir + "/package-lock.json")) {
-                    std::ifstream lockFile(tmpDir + "/package-lock.json");
-                    std::stringstream buffer;
-                    buffer << lockFile.rdbuf();
-                    
-                    std::string lockfilePath = filePath;
-                    size_t pos = lockfilePath.rfind("package.json");
-                    if (pos != std::string::npos) {
-                        lockfilePath.replace(pos, 12, "package-lock.json");
-                    } else {
-                        lockfilePath = "package-lock.json";
-                    }
-                    lockfiles[lockfilePath] = buffer.str();
-                } else {
-                    std::cerr << "  [Node Error] Failed to generate package-lock.json.\n";
-                }
-
-                std::filesystem::remove_all(tmpDir);
-            }
+    void EnsureBranchExists(const std::string& projectId, const std::string& branchName, const std::string& defaultBranch, bool& branchCreated) const {
+        if (!branchCreated) {
+            gitlab->CreateBranch(projectId, branchName, defaultBranch);
+            branchCreated = true;
         }
-        return lockfiles;
     }
 
-    void Process(const ProjectContext& project, const std::vector<std::string>& repoFiles) override {
-        std::vector<std::string> pkgFiles, sourceFiles;
-        
+    void CategorizeFiles(const std::vector<std::string>& repoFiles, std::vector<std::string>& pkgFiles, std::vector<std::string>& sourceFiles) const {
         for (const auto& file : repoFiles) {
             if (file.ends_with("package.json")) {
                 pkgFiles.push_back(file);
@@ -84,16 +31,9 @@ public:
                 sourceFiles.push_back(file);
             }
         }
+    }
 
-        if (pkgFiles.empty()) return;
-
-        std::vector<DependencyChange> masterChanges;
-        std::vector<std::string> modifiedBuildFiles;
-        std::map<std::string, std::string> pendingLockfileTargets;
-        
-        std::string branchName = GenerateBranchName("node");
-        bool branchCreated = false;
-
+    void ProcessPackageFiles(const ProjectContext& project, const std::string& branchName, const std::vector<std::string>& pkgFiles, std::vector<DependencyChange>& masterChanges, std::vector<std::string>& modifiedBuildFiles, std::map<std::string, std::string>& pendingLockfileTargets, bool& branchCreated) {
         for (const auto& pkgFilePath : pkgFiles) {
             std::string content = gitlab->FetchFileContent(project.projectId, pkgFilePath, project.defaultBranch);
             if (content.empty()) continue;
@@ -116,28 +56,23 @@ public:
             }
 
             if (fileChanged && updatedContent != content) {
-                if (!branchCreated) {
-                    try { gitlab->CreateBranch(project.projectId, branchName, project.defaultBranch); branchCreated = true; } 
-                    catch (...) { return; }
-                }
+                EnsureBranchExists(project.projectId, branchName, project.defaultBranch, branchCreated);
                 gitlab->CommitFile(project.projectId, branchName, pkgFilePath, updatedContent, "chore: Update Node dependencies in " + pkgFilePath);
                 modifiedBuildFiles.push_back(pkgFilePath);
                 pendingLockfileTargets[pkgFilePath] = updatedContent;
             }
         }
+    }
 
-        if (masterChanges.empty() || !branchCreated) return;
-        DeduplicateChanges(masterChanges);
-        
-        // Generate and commit lockfiles
+    void SyncLockfiles(const std::string& projectId, const std::string& branchName, const std::map<std::string, std::string>& pendingLockfileTargets, std::vector<std::string>& modifiedBuildFiles) {
         auto generatedLockfiles = GenerateLockfiles(pendingLockfileTargets);
         for (const auto& [lockPath, lockContent] : generatedLockfiles) {
-            gitlab->CommitFile(project.projectId, branchName, lockPath, lockContent, "chore: Sync package-lock.json");
+            gitlab->CommitFile(projectId, branchName, lockPath, lockContent, "chore: Sync package-lock.json");
             modifiedBuildFiles.push_back(lockPath);
         }
+    }
 
-        std::vector<std::string> modifiedSourceFiles;
-
+    void RefactorSourceFiles(const ProjectContext& project, const std::string& branchName, const std::vector<std::string>& sourceFiles, const std::vector<DependencyChange>& masterChanges, std::vector<std::string>& modifiedSourceFiles) {
         for (const auto& filePath : sourceFiles) {
             std::string baseCode = gitlab->FetchFileContent(project.projectId, filePath, project.defaultBranch);
             if (baseCode.empty()) continue;
@@ -174,10 +109,84 @@ public:
                 modifiedSourceFiles.push_back(filePath);
             }
         }
+    }
+
+public:
+    NodeHandler(
+        std::shared_ptr<IGitLabClient> glClient,
+        std::shared_ptr<IAICodeAssistant> aiAssistant,
+        std::shared_ptr<INpmParser> npmParser,
+        std::shared_ptr<INpmRegistry> npmRegistry,
+        const std::vector<DependencyMigration>& migrations)
+        : BaseEcosystemHandler(glClient, aiAssistant, migrations), 
+          parser(npmParser), registry(npmRegistry) {}
+
+    std::string GetEcosystemName() const override { return "Node.js (JS/TS)"; }
+
+    std::vector<std::string> GetTargetExtensions() const override {
+        return {"package.json", ".js", ".ts", ".jsx", ".tsx"};
+    }
+
+    std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const override {
+        std::map<std::string, std::string> lockfiles;
+        
+        for (const auto& [filePath, newContent] : modifiedBuildFiles) {
+            if (filePath.find("package.json") != std::string::npos) {
+                std::string tmpDir = "/tmp/deps_bot_node_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+                std::filesystem::create_directories(tmpDir);
+
+                std::ofstream outJson(tmpDir + "/package.json");
+                outJson << newContent;
+                outJson.close();
+
+                std::cout << "  [Node] Generating package-lock.json locally...\n";
+                std::string cmd = "cd " + tmpDir + " && npm install --package-lock-only --ignore-scripts > /dev/null 2>&1";
+                int result = std::system(cmd.c_str());
+
+                if (result == 0 && std::filesystem::exists(tmpDir + "/package-lock.json")) {
+                    std::ifstream lockFile(tmpDir + "/package-lock.json");
+                    std::stringstream buffer;
+                    buffer << lockFile.rdbuf();
+                    
+                    std::string lockfilePath = filePath;
+                    size_t pos = lockfilePath.rfind("package.json");
+                    if (pos != std::string::npos) {
+                        lockfilePath.replace(pos, 12, "package-lock.json");
+                    } else {
+                        lockfilePath = "package-lock.json";
+                    }
+                    lockfiles[lockfilePath] = buffer.str();
+                }
+
+                std::filesystem::remove_all(tmpDir);
+            }
+        }
+        return lockfiles;
+    }
+
+    void Process(const ProjectContext& project, const std::vector<std::string>& repoFiles) override {
+        std::vector<std::string> pkgFiles, sourceFiles;
+        CategorizeFiles(repoFiles, pkgFiles, sourceFiles);
+
+        if (pkgFiles.empty()) return;
+
+        std::vector<DependencyChange> masterChanges;
+        std::vector<std::string> modifiedBuildFiles;
+        std::map<std::string, std::string> pendingLockfileTargets;
+        std::string branchName = GenerateBranchName("node");
+        bool branchCreated = false;
+
+        ProcessPackageFiles(project, branchName, pkgFiles, masterChanges, modifiedBuildFiles, pendingLockfileTargets, branchCreated);
+
+        if (masterChanges.empty() || !branchCreated) return;
+        DeduplicateChanges(masterChanges);
+        
+        SyncLockfiles(project.projectId, branchName, pendingLockfileTargets, modifiedBuildFiles);
+
+        std::vector<std::string> modifiedSourceFiles;
+        RefactorSourceFiles(project, branchName, sourceFiles, masterChanges, modifiedSourceFiles);
 
         std::string mrDescription = BuildMergeRequestDescription(masterChanges, modifiedSourceFiles, modifiedBuildFiles);
-        mrDescription += "\n\n> **Note:** Please run `npm install` locally before merging to ensure `package-lock.json` is synced and tests pass.";
-        
         gitlab->CreateMergeRequest(project.projectId, branchName, project.defaultBranch, "chore: Automated Node.js Dependency Update", mrDescription);
     }
 };

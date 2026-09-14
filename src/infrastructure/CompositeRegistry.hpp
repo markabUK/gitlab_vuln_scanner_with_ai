@@ -43,7 +43,6 @@ public:
             return reg->InspectVersionDiff(oldDep, newDep);
         }
         
-        // Safe fallback if no registry matched
         DependencyChange diff;
         diff.oldDep = oldDep;
         diff.newDep = newDep;
