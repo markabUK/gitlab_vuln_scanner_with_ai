@@ -4,7 +4,6 @@
 #include "../infrastructure/AppSettings.hpp"
 #include "../infrastructure/StringUtils.hpp"
 #include <memory>
-#include <iostream>
 #include <sstream>
 #include <chrono>
 #include <vector>
@@ -12,6 +11,7 @@
 #include <set>
 #include <algorithm>
 #include <map>
+#include <spdlog/spdlog.h>
 
 class BaseEcosystemHandler : public IEcosystemHandler {
 protected:

@@ -4,7 +4,7 @@
 #include "../infrastructure/HttpClient.hpp"
 #include "../infrastructure/AiRetryStrategy.hpp"
 #include <nlohmann/json.hpp>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <string>
 
 using json = nlohmann::json;
@@ -36,13 +36,14 @@ public:
 
     std::string RefactorCode(const RefactorRequest& request) override {
         CommentSyntax cs = GetCommentSyntax(request.filePath);
-        std::string baseContentAbove =
+        std::string contentAbove =
             cs.prefix + "TASK: REFACTOR ENTIRE FILE FOR DEPENDENCY UPDATE" + cs.suffix + "\n" +
             cs.prefix + "From: " + request.changeDetails.oldDep.group + ":" + request.changeDetails.oldDep.name +
             " (" + request.changeDetails.oldDep.version + ")" + cs.suffix + "\n" +
             cs.prefix + "To: " + request.changeDetails.newDep.group + ":" + request.changeDetails.newDep.name +
             " (" + request.changeDetails.newDep.version + ")" + cs.suffix + "\n" +
             cs.prefix + "Notes: " + request.changeDetails.releaseNotes + cs.suffix + "\n" +
+            cs.prefix + "If the code is already fully compatible and requires NO changes, output exactly: NO_CHANGES_NEEDED" + cs.suffix + "\n" +
             cs.prefix + "--- ORIGINAL CODE START ---" + cs.suffix + "\n\n" +
             request.originalCode + "\n\n" +
             cs.prefix + "--- REFACTORED CODE START ---" + cs.suffix + "\n";
@@ -52,12 +53,8 @@ public:
             {"Content-Type", "application/json"}
         };
 
-        return AiRetryStrategy::Execute(3, 2000, request.originalCode, [&](int attempt, bool isRetry) {
-            std::string contentAbove = baseContentAbove;
-            if (isRetry) {
-                contentAbove = cs.prefix + "CRITICAL: Previous attempt failed. Apply the updates!" + cs.suffix + "\n" + contentAbove;
-            }
-
+        // Lambda now only takes 'attempt'
+        return AiRetryStrategy::Execute(3, 2000, request.originalCode, [&](int attempt) {
             json payload = {
                 {"current_file", {
                     {"file_name", request.filePath},
@@ -70,13 +67,19 @@ public:
             };
             if (!projectPath.empty()) payload["project_path"] = projectPath;
 
+            spdlog::debug("[GitLab Duo] Requesting completion for {} (Attempt {})", request.filePath, attempt);
             auto response = HttpClient::Post(gitlabHost + "/api/v4/code_suggestions/completions", payload.dump(), headers);
 
             if (response.statusCode == 200) {
                 auto jsonResp = json::parse(response.body);
-                if (jsonResp["choices"].empty()) return request.originalCode;
+                if (jsonResp["choices"].empty()) {
+                    spdlog::debug("[GitLab Duo] No choices returned by model.");
+                    return request.originalCode;
+                }
                 return jsonResp["choices"][0]["text"].get<std::string>();
             }
+            
+            spdlog::error("[GitLab Duo] API failure. Status: {} - Body: {}", response.statusCode, response.body);
             return std::string(""); // Trigger retry on HTTP failure
         });
     }

@@ -3,7 +3,7 @@
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/AppSettings.hpp"
 #include <memory>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <chrono>
 #include <vector>
 #include <string>
@@ -90,14 +90,14 @@ private:
             }
 
             if (hasHumanCommits) {
-                std::cout << "  [SKIP] MR !" << mr.iid << " contains manual human commits from " << humanName << " (" << humanEmail << ").\n";
-                std::cout << "         Preserving their work and skipping project.\n";
+                spdlog::warn("[SKIP] MR !{} contains manual human commits from {} ({}).", mr.iid, humanName, humanEmail);
+                spdlog::warn("       Preserving their work and skipping project.");
                 notifier->NotifyUserOfSkippedMR(project.projectName, humanName, humanEmail, mr.webUrl);
                 return true; // Skip project
             }
 
             if (!IsOlderThanOneMonth(mr.createdAt)) {
-                std::cout << "  Found recent active MR with no manual commits. Skipping project.\n";
+                spdlog::info("  Found recent active MR with no manual commits. Skipping project.");
                 return true; // Skip project
             }
         }
@@ -106,7 +106,7 @@ private:
 
     void CleanupStaleMergeRequests(const std::string& projectId, const std::vector<MergeRequest>& ourMrs) {
         for (const auto& mr : ourMrs) {
-            std::cout << "  Closing stale, untouched MR (" << mr.sourceBranch << ")...\n";
+            spdlog::info("  Closing stale, untouched MR ({})...", mr.sourceBranch);
             gitlab->CloseMergeRequest(projectId, mr.iid);
             gitlab->DeleteBranch(projectId, mr.sourceBranch);
         }
@@ -118,15 +118,15 @@ private:
             auto relevantFiles = gitlab->GetSourceFiles(project.projectId, project.defaultBranch, targetExtensions);
             
             if (!relevantFiles.empty()) {
-                std::cout << "Executing " << handler->GetEcosystemName() << " workflow...\n";
+                spdlog::info("Executing {} workflow...", handler->GetEcosystemName());
                 handler->Process(project, relevantFiles);
             }
         }
     }
 
     void ProcessProject(const ProjectContext& project) {
-        std::cout << "--------------------------------------------------\n";
-        std::cout << "Processing Project: " << project.projectName << "\n";
+        spdlog::info("--------------------------------------------------");
+        spdlog::info("Processing Project: {}", project.projectName);
         
         std::vector<MergeRequest> botMrs = GetBotMergeRequests(project.projectId);
 
@@ -153,21 +153,21 @@ public:
         std::vector<ProjectContext> projects;
 
         if (targetConfig.type == "Project") {
-            std::cout << "Starting Unified Workflow for Single Project ID: " << targetConfig.id << "...\n";
+            spdlog::info("Starting Unified Workflow for Single Project ID: {}...", targetConfig.id);
             auto projOpt = gitlab->GetProject(targetConfig.id);
             if (projOpt) {
                 projects.push_back(*projOpt);
             }
         } else {
-            std::cout << "Starting Unified Workflow for Group ID: " << targetConfig.id << "...\n";
+            spdlog::info("Starting Unified Workflow for Group ID: {}...", targetConfig.id);
             projects = gitlab->GetProjectsInGroup(targetConfig.id);
         }
 
-        std::cout << "Found " << projects.size() << " initial project(s) before filtering.\n";
+        spdlog::info("Found {} initial project(s) before filtering.", projects.size());
         
         for (const auto& project : projects) {
             if (IsExcluded(project)) {
-                std::cout << " [SKIP] Project excluded by configuration: " << project.projectName << "\n";
+                spdlog::info("[SKIP] Project excluded by configuration: {}", project.projectName);
                 continue;
             }
             ProcessProject(project);

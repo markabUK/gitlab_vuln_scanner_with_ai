@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <map>
+#include <spdlog/spdlog.h>
 
 class GoHandler : public BaseEcosystemHandler {
 private:
@@ -51,7 +52,8 @@ private:
                     updatedContent = parser->UpdateDependencyVersion(updatedContent, dep, diff.newDep);
                     masterChanges.push_back(diff);
                     fileChanged = true;
-                    std::cout << "[Go] Update found in " << modFilePath << ": " << dep.name << " (" << dep.version << " -> " << diff.newDep.version << ")\n";
+                    
+                    spdlog::info("[Go] Update found in {}: {} ({} -> {})", modFilePath, dep.name, dep.version, diff.newDep.version);
                 }
             }
 
@@ -97,7 +99,7 @@ private:
             combinedNotes += "\nOUTPUT FORMAT: Return ONLY the raw updated source code. DO NOT wrap in markdown blocks.";
             combinedChange.releaseNotes = combinedNotes;
 
-            std::cout << " -> AI analyzing Go file " << filePath << "...\n";
+            spdlog::info(" -> AI analyzing Go file {}...", filePath);
             RefactorRequest req = {filePath, baseCode, combinedChange, BuildCombinedContext(relevantChanges)};
             std::string rawAiCode = ai->RefactorCode(req);
             
@@ -139,7 +141,7 @@ public:
                 outMod << newContent;
                 outMod.close();
 
-                std::cout << "  [Go] Generating go.sum locally...\n";
+                spdlog::info("  [Go] Generating go.sum locally...");
                 std::string cmd = "cd " + tmpDir + " && go mod tidy > /dev/null 2>&1";
                 int result = std::system(cmd.c_str());
 

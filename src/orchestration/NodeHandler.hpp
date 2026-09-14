@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <map>
+#include <spdlog/spdlog.h>
 
 class NodeHandler : public BaseEcosystemHandler {
 private:
@@ -51,7 +52,8 @@ private:
                     updatedContent = parser->UpdateDependencyVersion(updatedContent, dep, diff.newDep);
                     masterChanges.push_back(diff);
                     fileChanged = true;
-                    std::cout << "[Node] Update found in " << pkgFilePath << ": " << dep.name << " (" << dep.version << " -> " << diff.newDep.version << ")\n";
+                    
+                    spdlog::info("[Node] Update found in {}: {} ({} -> {})", pkgFilePath, dep.name, dep.version, diff.newDep.version);
                 }
             }
 
@@ -97,7 +99,8 @@ private:
             combinedNotes += "\nOUTPUT FORMAT: Return ONLY the raw updated source code. DO NOT wrap in markdown blocks.";
             combinedChange.releaseNotes = combinedNotes;
 
-            std::cout << " -> AI analyzing Node file " << filePath << "...\n";
+            spdlog::info(" -> AI analyzing Node file {}...", filePath);
+            
             RefactorRequest req = {filePath, baseCode, combinedChange, BuildCombinedContext(relevantChanges)};
             std::string rawAiCode = ai->RefactorCode(req);
             
@@ -139,7 +142,7 @@ public:
                 outJson << newContent;
                 outJson.close();
 
-                std::cout << "  [Node] Generating package-lock.json locally...\n";
+                spdlog::info("  [Node] Generating package-lock.json locally...");
                 std::string cmd = "cd " + tmpDir + " && npm install --package-lock-only --ignore-scripts > /dev/null 2>&1";
                 int result = std::system(cmd.c_str());
 

@@ -3,7 +3,7 @@
 #include "../domain/Interfaces.hpp"
 #include "HttpClient.hpp"
 #include <nlohmann/json.hpp>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <stdexcept>
 
@@ -40,7 +40,7 @@ public:
         auto response = HttpClient::Get(url, GetAuthHeaders());
         
         if (response.statusCode != 200) {
-            std::cerr << "Failed to fetch project '" << projectId << "'. GitLab API returned: " << response.statusCode << "\n";
+            spdlog::error("Failed to fetch project '{}'. GitLab API returned: {}", projectId, response.statusCode);
             return std::nullopt;
         }
 
@@ -52,7 +52,7 @@ public:
             ctx.defaultBranch = item.value("default_branch", "main");
             return ctx;
         } catch (const std::exception& e) {
-            std::cerr << "Failed to parse project JSON for '" << projectId << "': " << e.what() << "\n";
+            spdlog::error("Failed to parse project JSON for '{}': {}", projectId, e.what());
             return std::nullopt;
         }
     }
@@ -62,7 +62,7 @@ public:
         int page = 1;
         bool hasMore = true;
 
-        std::cout << "Fetching all projects in group " << groupId << " (including subgroups)...\n";
+        spdlog::info("Fetching all projects in group {} (including subgroups)...", groupId);
 
         while (hasMore) {
             std::string url = baseUrl + "/api/v4/groups/" + UrlEncode(groupId) +
@@ -71,7 +71,7 @@ public:
             auto response = HttpClient::Get(url, GetAuthHeaders());
             
             if (response.statusCode != 200) {
-                std::cerr << "Failed to fetch projects. GitLab API returned: " << response.statusCode << "\n";
+                spdlog::error("Failed to fetch projects. GitLab API returned: {}", response.statusCode);
                 break;
             }
 
@@ -209,7 +209,6 @@ public:
                 mr.sourceBranch = item["source_branch"].get<std::string>();
                 mr.createdAt = item["created_at"].get<std::string>();
                 
-                // NEW: Populate MR web URL and author info
                 mr.webUrl = item.value("web_url", "");
                 if (item.contains("author")) {
                     mr.authorEmail = item["author"].value("email", "");

@@ -38,6 +38,7 @@ public:
     std::string openAiApiKey;
     std::string ollamaEndpoint;
     std::string ollamaModel;
+    int ollamaContextLength = 32768;
     
     std::string googleChatWebhook;
     
@@ -82,6 +83,7 @@ private:
         settings.openAiApiKey = aiJson.value("OpenAIApiKey", "");
         settings.ollamaEndpoint = aiJson.value("OllamaEndpoint", "http://localhost:11434/api/generate");
         settings.ollamaModel = aiJson.value("OllamaModel", "qwen2.5-coder:7b");
+        settings.ollamaContextLength = aiJson.value("OllamaContextLength", 32768);
     }
 
     static void ParseNotifications(const json& j, AppSettings& settings) {
@@ -130,6 +132,8 @@ private:
         for (auto it = j["Migrations"].begin(); it != j["Migrations"].end(); ++it) {
             std::string ecosystem = it.key();
             
+            auto& migrationList = settings.migrations[ecosystem];
+
             for (const auto& mJson : it.value()) {
                 DependencyMigration dm;
                 dm.oldGroup = mJson.value("OldGroup", "");
@@ -148,7 +152,7 @@ private:
                         buffer << docFile.rdbuf();
                         dm.migrationDocContent = buffer.str();
                     } else {
-                        std::cerr << "Warning: MigrationDocPath not found: " << dm.migrationDocPath << "\n";
+                        spdlog::warn("MigrationDocPath not found: {}", dm.migrationDocPath);
                     }
                 }
                 
@@ -160,7 +164,7 @@ private:
                         dm.replacements.push_back(cr);
                     }
                 }
-                settings.migrations[ecosystem].push_back(dm);
+                migrationList.push_back(dm);
             }
         }
     }

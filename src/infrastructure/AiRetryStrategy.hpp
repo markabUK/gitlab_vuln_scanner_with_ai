@@ -14,15 +14,13 @@ public:
         int maxRetries,
         int initialBackoffMs,
         const std::string& originalCode,
-        std::function<std::string(int attempt, bool isRetry)> apiCall) 
+        std::function<std::string(int attempt)> apiCall) 
     {
         int backoff = initialBackoffMs;
-        bool isRetry = false;
 
         for (int attempt = 1; attempt <= maxRetries; ++attempt) {
             try {
-                // The lambda should return an empty string to signal a network/HTTP failure
-                std::string rawOutput = apiCall(attempt, isRetry);
+                std::string rawOutput = apiCall(attempt);
 
                 if (rawOutput.empty()) {
                     if (attempt < maxRetries) {
@@ -34,15 +32,18 @@ public:
                     continue;
                 }
 
-                std::string cleanedCode = StringUtils::CleanAIOutput(rawOutput, originalCode);
-
-                // Success check: did it actually change anything?
-                if (cleanedCode != originalCode && !cleanedCode.empty()) {
-                    return cleanedCode; 
+                if (rawOutput.find("NO_CHANGES_NEEDED") != std::string::npos) {
+                    std::cout << "  [AI] Code is already compatible. No changes applied.\n";
+                    return originalCode;
                 }
 
-                std::cout << "  [AI Retry] Model returned unchanged code. Forcing a retry (" << attempt << "/" << maxRetries << ")...\n";
-                isRetry = true;
+                std::string cleanedCode = StringUtils::CleanAIOutput(rawOutput, originalCode);
+
+                if (cleanedCode == originalCode) {
+                    std::cout << "  [AI] Model returned unchanged code. Assuming compatibility.\n";
+                }
+
+                return cleanedCode; 
                 
             } catch (const std::exception& e) {
                 std::cerr << "  [AI ERROR] Attempt " << attempt << " threw exception: " << e.what() << "\n";
@@ -53,7 +54,7 @@ public:
             }
         }
 
-        std::cout << "  [AI WARNING] Max retries reached or model refused to modify code. Leaving file unchanged.\n";
+        std::cout << "  [AI WARNING] Max retries reached. Leaving file unchanged.\n";
         return originalCode;
     }
 };

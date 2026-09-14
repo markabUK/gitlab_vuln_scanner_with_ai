@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BaseEcosystemHandler.hpp"
+#include <spdlog/spdlog.h>
 
 class JavaHandler : public BaseEcosystemHandler {
 private:
@@ -67,7 +68,7 @@ private:
 
                     masterChanges.push_back(diff);
                     fileChanged = true;
-                    std::cout << "[Java] Update found in " << buildFilePath << ": " << dep.name << " (" << dep.version << " -> " << diff.newDep.version << ")\n";
+                    spdlog::info("[Java] Update found in {}: {} ({} -> {})", buildFilePath, dep.name, dep.version, diff.newDep.version);
                 }
             }
 
@@ -104,7 +105,7 @@ private:
             combinedNotes += "\nOUTPUT FORMAT: Return ONLY the raw updated source code. DO NOT wrap in markdown blocks.";
             combinedChange.releaseNotes = combinedNotes;
 
-            std::cout << " -> AI analyzing Java file " << filePath << "...\n";
+            spdlog::info(" -> AI analyzing Java file {}...", filePath);
             RefactorRequest req = {filePath, baseCode, combinedChange, BuildCombinedContext(relevantChanges)};
             std::string rawAiCode = ai->RefactorCode(req);
             

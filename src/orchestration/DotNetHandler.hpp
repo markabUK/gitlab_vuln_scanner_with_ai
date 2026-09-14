@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BaseEcosystemHandler.hpp"
+#include <spdlog/spdlog.h>
 
 class DotNetHandler : public BaseEcosystemHandler {
 private:
@@ -34,11 +35,11 @@ private:
         }
 
         if (!slnxFilePath.empty()) {
-            std::cout << "[.NET] Detected .slnx solution: " << slnxFilePath << "\n";
+            spdlog::info("[.NET] Detected .slnx solution: {}", slnxFilePath);
             std::string slnxContent = gitlab->FetchFileContent(project.projectId, slnxFilePath, project.defaultBranch);
             return parser->ParseSlnxProjects(slnxContent);
         } else if (!dotnetProjectFiles.empty()) {
-            std::cout << "[.NET] No .slnx found. Managing discovered .csproj files independently.\n";
+            spdlog::info("[.NET] No .slnx found. Managing discovered .csproj files independently.");
             return dotnetProjectFiles;
         } 
         
@@ -63,7 +64,7 @@ private:
                         DependencyChange diff = {dep, newDep, false, "", "", "Upgraded to .NET 10 LTS.", false};
                         masterChanges.push_back(diff);
                         fileChanged = true;
-                        std::cout << "[.NET] Framework Update found in " << projPath << ": " << dep.version << " -> net10.0\n";
+                        spdlog::info("[.NET] Framework Update found in {}: {} -> net10.0", projPath, dep.version);
                     }
                     continue;
                 }
@@ -76,7 +77,7 @@ private:
                     updatedContent = parser->UpdateDependencyVersion(updatedContent, dep, diff.newDep);
                     masterChanges.push_back(diff);
                     fileChanged = true;
-                    std::cout << "[.NET] NuGet Update found in " << projPath << ": " << dep.name << " (" << dep.version << " -> " << diff.newDep.version << ")\n";
+                    spdlog::info("[.NET] NuGet Update found in {}: {} ({} -> {})", projPath, dep.name, dep.version, diff.newDep.version);
                 }
             }
 
@@ -117,7 +118,7 @@ private:
             combinedNotes += "\nOUTPUT FORMAT: Return ONLY the raw updated source code. DO NOT wrap in markdown blocks.";
             combinedChange.releaseNotes = combinedNotes;
 
-            std::cout << " -> AI analyzing .NET file " << filePath << "...\n";
+            spdlog::info(" -> AI analyzing .NET file {}...", filePath);
             RefactorRequest req = {filePath, baseCode, combinedChange, BuildCombinedContext(relevantChanges)};
             std::string rawAiCode = ai->RefactorCode(req);
             

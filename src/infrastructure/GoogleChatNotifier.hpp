@@ -3,7 +3,7 @@
 #include "../domain/Interfaces.hpp"
 #include "HttpClient.hpp"
 #include <nlohmann/json.hpp>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <string>
 
 using json = nlohmann::json;
@@ -22,7 +22,7 @@ public:
         const std::string& mrUrl) override 
     {
         if (webhookUrl.empty()) {
-            std::cout << "  [Notify] Google Chat webhook not configured. Skipping notification.\n";
+            spdlog::info("[Notify] Google Chat webhook not configured. Skipping notification.");
             return;
         }
 
@@ -45,10 +45,9 @@ public:
         auto response = HttpClient::Post(webhookUrl, payload.dump(), headers);
 
         if (response.statusCode != 200) {
-            std::cerr << "  [Notify] Failed to send Google Chat message. Status " << response.statusCode << "\n"
-                      << "  Response: " << response.body << "\n";
+            spdlog::error("[Notify] Failed to send Google Chat message. Status {} - Response: {}", response.statusCode, response.body);
         } else {
-            std::cout << "  [Notify] Successfully pinged Google Chat regarding " << projectName << ".\n";
+            spdlog::info("[Notify] Successfully pinged Google Chat regarding {}.", projectName);
         }
     }
 };

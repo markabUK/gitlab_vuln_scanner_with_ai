@@ -44,6 +44,13 @@ CPMAddPackage(
         "CPR_ENABLE_SSL ON"
 )
 
+# 3. spdlog: Fast C++ logging library
+CPMAddPackage(
+    NAME spdlog
+    GITHUB_REPOSITORY gabime/spdlog
+    GIT_TAG v1.14.1 # Latest stable
+)
+
 # ---------------------------------------------------------------------------
 # Executable & Include Target
 # ---------------------------------------------------------------------------
@@ -58,4 +65,5 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
     nlohmann_json::nlohmann_json
     cpr::cpr
+    spdlog::spdlog
 )

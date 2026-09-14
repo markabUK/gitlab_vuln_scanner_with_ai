@@ -3,7 +3,7 @@
 #include "../domain/Interfaces.hpp"
 #include "HttpClient.hpp"
 #include <nlohmann/json.hpp>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cctype>
 
@@ -28,7 +28,7 @@ public:
                 return jsonResp["Version"].get<std::string>();
             }
         } catch (const std::exception& e) {
-            std::cerr << "Failed to parse Go Proxy response for " << oldDep.name << ": " << e.what() << "\n";
+            spdlog::error("Failed to parse Go Proxy response for {}: {}", oldDep.name, e.what());
         }
         return std::nullopt;
     }

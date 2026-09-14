@@ -4,7 +4,7 @@
 #include "../infrastructure/HttpClient.hpp"
 #include "../infrastructure/AiRetryStrategy.hpp"
 #include <nlohmann/json.hpp>
-#include <iostream>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -33,14 +33,15 @@ public:
     std::string GetProviderName() const override { return "Google Gemini (gemini-3.7-flash)"; }
 
     std::string RefactorCode(const RefactorRequest& request) override {
-        std::string basePrompt = 
+        std::string prompt = 
             "You are an expert developer. A dependency was updated:\n"
             "From: " + request.changeDetails.oldDep.group + ":" + request.changeDetails.oldDep.name + 
             " (" + request.changeDetails.oldDep.version + ")\n"
             "To: " + request.changeDetails.newDep.version + "\n"
             "Notes: " + request.changeDetails.releaseNotes + "\n\n"
-            "Refactor the following file to be compatible with the new version. "
-            "CRITICAL INSTRUCTION: Output ONLY the raw refactored code.\n\n"
+            "Refactor the following file to be compatible with the new version.\n"
+            "CRITICAL INSTRUCTION: If the code requires updates, output ONLY the raw refactored code.\n"
+            "If the code is already fully compatible and requires NO changes, output exactly this text and nothing else: NO_CHANGES_NEEDED\n\n"
             "--- ORIGINAL CODE ---\n" + request.originalCode;
 
         std::string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent";
@@ -49,31 +50,29 @@ public:
             {"Content-Type", "application/json"}
         };
 
-        return AiRetryStrategy::Execute(5, 2000, request.originalCode, [&](int attempt, bool isRetry) {
+        // Lambda now only takes 'attempt'
+        return AiRetryStrategy::Execute(5, 2000, request.originalCode, [&](int attempt) {
             EnforceRateLimit();
-
-            std::string prompt = basePrompt;
-            if (isRetry) {
-                prompt += "\n\nCRITICAL WARNING: You previously returned the code unchanged. You MUST apply the updates.";
-            }
 
             json payload = {
                 {"contents", {{ {"role", "user"}, {"parts", {{ {"text", prompt} }}} }}},
                 {"generationConfig", { {"temperature", 0.0} }}
             };
 
+            spdlog::debug("[Gemini] Sending payload to API (Attempt {})", attempt);
             auto response = HttpClient::Post(url, payload.dump(), headers);
 
             if (response.statusCode == 200) {
                 auto jsonResp = json::parse(response.body);
-                // Return raw string; strategy handles cleaning
                 return jsonResp["candidates"][0]["content"]["parts"][0]["text"].get<std::string>();
             }
             
             if (response.statusCode == 503 || response.statusCode == 429) {
+                spdlog::warn("[Gemini] Rate limited or unavailable (Status: {})", response.statusCode);
                 return std::string(""); // Trigger backoff logic in strategy
             }
             
+            spdlog::error("[Gemini] API unrecoverable status: {} - Body: {}", response.statusCode, response.body);
             throw std::runtime_error("Gemini API unrecoverable status " + std::to_string(response.statusCode));
         });
     }
