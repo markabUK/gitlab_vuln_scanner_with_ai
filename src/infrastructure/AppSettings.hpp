@@ -39,6 +39,7 @@ public:
     std::string ollamaEndpoint;
     std::string ollamaModel;
     int ollamaContextLength = 32768;
+    int ollamaOutputLength = 16384;
     
     std::string googleChatWebhook;
     

@@ -14,12 +14,14 @@ private:
     std::string model;
     std::string endpoint;
     int contextLength;
+    int maxTokens;
 
 public:
     explicit OllamaAdapter(const std::string& modelName = "qwen2.5-coder:7b", 
                            const std::string& url = "http://localhost:11434/api/chat",
-                           int ctxLength = 32768)
-        : model(modelName), endpoint(url), contextLength(ctxLength) {}
+                           int ctxLength = 32768,
+                           int outputLength = 16384)
+        : model(modelName), endpoint(url), contextLength(ctxLength), maxTokens(outputLength) {}
 
     std::string GetProviderName() const override { return "Ollama (" + model + ")"; }
 
@@ -51,7 +53,7 @@ public:
                 {"options", { 
                     {"temperature", 0.0}, 
                     {"num_ctx", contextLength},
-                    {"num_predict", 16384}
+                    {"num_predict", maxTokens}
                 }
                 }
             };

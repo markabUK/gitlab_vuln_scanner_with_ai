@@ -83,7 +83,7 @@ std::shared_ptr<IAICodeAssistant> BuildAiAssistant(const AppSettings& settings, 
     
     if (settings.aiProvider == "OPENAI") return std::make_shared<OpenAIAdapter>(settings.openAiApiKey);
     if (settings.aiProvider == "DUO") return std::make_shared<GitLabDuoAdapter>(settings.gitlabHost, settings.gitlabToken);
-    if (settings.aiProvider == "OLLAMA") return std::make_shared<OllamaAdapter>(settings.ollamaModel, settings.ollamaEndpoint, settings.ollamaContextLength);
+    if (settings.aiProvider == "OLLAMA") return std::make_shared<OllamaAdapter>(settings.ollamaModel, settings.ollamaEndpoint, settings.ollamaContextLength, settings.ollamaOutputLength);
     
     return std::make_shared<GeminiAdapter>(settings.geminiApiKey);
 }
