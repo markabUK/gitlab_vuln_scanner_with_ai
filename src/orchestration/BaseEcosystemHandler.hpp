@@ -1,5 +1,4 @@
 #pragma once
-
 #include "../domain/Interfaces.hpp"
 #include "../infrastructure/AppSettings.hpp"
 #include "../infrastructure/StringUtils.hpp"
@@ -11,6 +10,8 @@
 #include <set>
 #include <algorithm>
 #include <map>
+#include <fstream>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 
 class BaseEcosystemHandler : public IEcosystemHandler {
@@ -18,21 +19,34 @@ protected:
     std::shared_ptr<IGitLabClient> gitlab;
     std::shared_ptr<IAICodeAssistant> ai;
     std::vector<DependencyMigration> migrations;
+    bool isDryRun;
 
 public:
     BaseEcosystemHandler(
         std::shared_ptr<IGitLabClient> glClient,
         std::shared_ptr<IAICodeAssistant> aiAssistant,
-        const std::vector<DependencyMigration>& configMigrations)
-        : gitlab(glClient), ai(aiAssistant), migrations(configMigrations) {}
+        const std::vector<DependencyMigration>& configMigrations,
+        bool dryRun = false)
+        : gitlab(glClient), ai(aiAssistant), migrations(configMigrations), isDryRun(dryRun) {}
 
     virtual ~BaseEcosystemHandler() = default;
 
-    virtual std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const override {
+    virtual std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>&) const override {
         return {}; 
     }
 
 protected:
+    void RecordChange(const ProjectContext& project, const std::string& branchName,
+                      const std::filesystem::path& fullDiskPath, const std::string& relRepoPath,
+                      const std::string& content, const std::string& commitMessage) const {
+        if (isDryRun) {
+            gitlab->CommitFile(project.projectId, branchName, relRepoPath, content, commitMessage);
+        } 
+        
+        std::ofstream out(fullDiskPath, std::ios::trunc);
+        out << content;
+    }
+
     std::string GenerateBranchName(const std::string& ecosystemPrefix) const {
         auto now = std::chrono::system_clock::now().time_since_epoch().count();
         return "chore/deps-update-" + ecosystemPrefix + "-" + std::to_string(now);
@@ -40,7 +54,6 @@ protected:
 
     int CompareVersions(const std::string& v1, const std::string& v2) const {
         if (v1.empty() || v2.empty()) return 0;
-        
         auto parse = [](const std::string& v) {
             std::vector<int> parts;
             std::stringstream ss(v);
@@ -51,11 +64,9 @@ protected:
             }
             return parts;
         };
-        
         auto p1 = parse(v1);
         auto p2 = parse(v2);
         size_t maxLen = std::max(p1.size(), p2.size());
-        
         for (size_t i = 0; i < maxLen; ++i) {
             int num1 = i < p1.size() ? p1[i] : 0;
             int num2 = i < p2.size() ? p2[i] : 0;
@@ -68,14 +79,8 @@ protected:
     bool IsMigrationApplicable(const DependencyMigration& m, const DependencyChange& change) const {
         if (!m.oldGroup.empty() && m.oldGroup != change.oldDep.group) return false;
         if (!m.oldName.empty() && m.oldName != change.oldDep.name) return false;
-
-        if (!m.maxOldVersion.empty() && CompareVersions(change.oldDep.version, m.maxOldVersion) > 0) {
-            return false;
-        }
-        if (!m.minNewVersion.empty() && CompareVersions(change.newDep.version, m.minNewVersion) < 0) {
-            return false;
-        }
-        
+        if (!m.maxOldVersion.empty() && CompareVersions(change.oldDep.version, m.maxOldVersion) > 0) return false;
+        if (!m.minNewVersion.empty() && CompareVersions(change.newDep.version, m.minNewVersion) < 0) return false;
         return true;
     }
 
@@ -91,10 +96,25 @@ protected:
         return combinedContext;
     }
 
+    std::string BuildStrictPromptInstructions(const std::string& language, const std::vector<DependencyChange>& relevantChanges) const {
+        std::string notes = "TASK: You are a strict, automated code refactoring engine. Update the provided " + language + " code ONLY to ensure compatibility with these upgraded dependencies:\n";
+        
+        for (const auto& c : relevantChanges) {
+            notes += "- `" + (c.oldDep.group.empty() ? c.oldDep.name : c.oldDep.group + ":" + c.oldDep.name) + "` upgraded to `" + c.newDep.version + "`\n";
+        }
+        
+        notes += "\nCRITICAL CONSTRAINTS (VIOLATION IS A FATAL ERROR):\n";
+        notes += "1. ZERO UNRELATED CHANGES: Do not touch, optimize, or reformat ANY code unrelated to the specific API changes of the dependencies listed above.\n";
+        notes += "2. PRESERVE STYLING: You must retain the exact original indentation, whitespace, and brace styling for all unmodified lines.\n";
+        notes += "3. NO CONVERSATION: Return ONLY the raw, updated source code. Do not include markdown code blocks (```), greetings, or explanations.\n";
+        notes += "4. EXIT HATCH: If the original code is already fully compatible with the new versions and requires NO modifications, you must output EXACTLY the text \"NO_CHANGES_NEEDED\" and nothing else.\n";
+        
+        return notes;
+    }
+
     void DeduplicateChanges(std::vector<DependencyChange>& changes) const {
         std::vector<DependencyChange> uniqueChanges;
         std::set<std::string> seenKeys;
-        
         for (const auto& change : changes) {
             std::string key = change.oldDep.group + ":" + change.oldDep.name;
             if (seenKeys.find(key) == seenKeys.end()) {
@@ -127,7 +147,6 @@ protected:
         ss << "## Automated " << GetEcosystemName() << " Dependency & Code Update\n\n";
         ss << "This Merge Request was automatically generated by the CLI tool using AI provider: **"
            << ai->GetProviderName() << "**.\n\n";
-
         ss << "### Updated Dependencies (" << changes.size() << ")\n\n";
         ss << "| Dependency | Old Version | New Version | Source / Notes |\n";
         ss << "| :--- | :--- | :--- | :--- |\n";
@@ -137,22 +156,18 @@ protected:
                << "| `" << change.oldDep.version << "` "
                << "| `" << change.newDep.version << "` "
                << "| ";
-
             if (change.skipAI) ss << "  *Internal Registry*";
             else if (change.hasPackageMove) ss << "  *Relocated to `" << change.newDep.group << ":" << change.newDep.name << "`*";
             else ss << "  *Public Registry*";
-
             if (!change.releaseNotes.empty() && !change.skipAI) ss << "   " << change.releaseNotes;
             ss << " |\n";
         }
         ss << "\n";
-
         ss << "### Build Configurations Updated\n\n";
         for (const auto& file : modifiedBuildFiles) {
             ss << "- [x] `" << file << "`\n";
         }
         ss << "\n";
-
         ss << "### Refactored Source Files (" << modifiedFiles.size() << ")\n\n";
         if (modifiedFiles.empty()) {
             ss << "_No source files required code modifications._\n\n";
@@ -163,7 +178,6 @@ protected:
             }
             ss << "\n";
         }
-
         return ss.str();
     }
 };

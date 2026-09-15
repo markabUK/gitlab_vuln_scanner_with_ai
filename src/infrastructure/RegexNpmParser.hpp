@@ -49,10 +49,29 @@ public:
         std::string safeName = EscapeRegex(oldDep.name);
         
         // We match the package name, the colon, and the opening quote of the version.
-        // We capture any existing semver prefix (^, ~) in Group 2 to preserve it!
+        // Group 1: "package-name": "
+        // Group 2: semver prefix (~, ^, >=, etc.)
+        // Group 3: closing quote "
         std::regex targetPattern(R"((\")" + safeName + R"(\"\s*:\s*\")([~^\>=<]*)[^\"]+(\"))");
         
-        // Replace with: "package-name": " + prefix + newVersion + "
-        return std::regex_replace(packageJsonContent, targetPattern, "$1$2" + newDep.version + "$3");
+        std::string result;
+        std::string remaining = packageJsonContent;
+        std::smatch match;
+
+        // Loop through and manually reconstruct the string using match pieces 
+        // to completely bypass the std::regex_replace "$21" capture group bug.
+        while (std::regex_search(remaining, match, targetPattern)) {
+            result += match.prefix().str(); // Everything before the match
+            
+            result += match[1].str();       // '"name": "'
+            result += match[2].str();       // Keeps the original '~' or '^'
+            result += newDep.version;       // Injects '1.6.3' safely
+            result += match[3].str();       // Closing '"'
+            
+            remaining = match.suffix().str(); // Everything after the match
+        }
+        
+        result += remaining;
+        return result;
     }
 };

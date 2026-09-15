@@ -51,7 +51,8 @@ public:
                 })},
                 {"stream", false},
                 {"options", { 
-                    {"temperature", 0.0}, 
+                    {"temperature", 0.1}, 
+                    {"repeat_penalty", 1.15}, 
                     {"num_ctx", contextLength},
                     {"num_predict", maxTokens}
                 }

@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <csignal>
 #include <spdlog/spdlog.h>
 
 // Core Infrastructure
@@ -12,6 +13,7 @@
 #include "infrastructure/DryRunGitLabClient.hpp"
 #include "infrastructure/CompositeRegistry.hpp"
 #include "infrastructure/GoogleChatNotifier.hpp"
+#include "infrastructure/GitManager.hpp" // Included for signal cleanup
 
 // Parsers & Registries
 #include "infrastructure/AdvancedGradleParser.hpp"
@@ -40,7 +42,15 @@
 #include "orchestration/NodeHandler.hpp"
 #include "orchestration/DependencyUpdateOrchestrator.hpp"
 
-// --- Helper Structs & Factory Functions ---
+// ============================================================================
+// SIGNAL HANDLER FOR GRACEFUL SHUTDOWN
+// ============================================================================
+void HandleSignal(int signal) {
+    spdlog::warn("\n[!] Interrupt signal ({}) received. Aborting process...", signal);
+    GitManager::CleanupAllWorkspaces();
+    spdlog::info("Shutdown complete.");
+    std::exit(signal);
+}
 
 struct CliArgs {
     std::string overrideTargetId;
@@ -72,7 +82,7 @@ std::shared_ptr<CompositeRegistry> BuildMavenRegistry(const AppSettings& setting
         if (regConfig.type == "GitLab") {
             router->AddRegistry(std::make_shared<GitLabMavenRegistry>(regConfig.url, regConfig.token), regConfig.groupPrefixes);
         } else {
-            router->AddRegistry(std::make_shared<MavenCentralRegistry>(settings.migrations.at("Java")), regConfig.groupPrefixes);
+            router->AddRegistry(std::make_shared<MavenCentralRegistry>(settings.GetMigrations("Java")), regConfig.groupPrefixes);
         }
     }
     return router;
@@ -91,37 +101,57 @@ std::shared_ptr<IAICodeAssistant> BuildAiAssistant(const AppSettings& settings, 
 std::vector<std::shared_ptr<IEcosystemHandler>> BuildHandlers(
     std::shared_ptr<IGitLabClient> gitlabClient, 
     std::shared_ptr<IAICodeAssistant> aiAssistant, 
-    const AppSettings& settings) 
+    const AppSettings& settings,
+    bool isDryRun) 
 {
     std::vector<std::shared_ptr<IEcosystemHandler>> handlers;
     
     handlers.push_back(std::make_shared<JavaHandler>(
-        gitlabClient, aiAssistant, std::make_shared<AdvancedGradleParser>(), std::make_shared<RegexPomParser>(), 
-        std::make_shared<RegexAntParser>(), BuildMavenRegistry(settings), settings.migrations.at("Java")));
+        gitlabClient, 
+        aiAssistant, 
+        std::make_shared<AdvancedGradleParser>(), 
+        std::make_shared<RegexPomParser>(), 
+        std::make_shared<RegexAntParser>(),  
+        BuildMavenRegistry(settings),        
+        settings.GetMigrations("Java"), 
+        isDryRun));
         
     handlers.push_back(std::make_shared<DotNetHandler>(
-        gitlabClient, aiAssistant, std::make_shared<RegexDotNetParser>(), std::make_shared<NuGetV3Registry>(), 
-        settings.migrations.at("DotNet")));
+        gitlabClient, 
+        aiAssistant, 
+        std::make_shared<RegexDotNetParser>(), 
+        std::make_shared<NuGetV3Registry>(), 
+        settings.GetMigrations("DotNet"), 
+        isDryRun));
         
     handlers.push_back(std::make_shared<GoHandler>(
-        gitlabClient, aiAssistant, std::make_shared<RegexGoParser>(), std::make_shared<GoModulesRegistry>(), 
-        settings.migrations.at("Go")));
+        gitlabClient, 
+        aiAssistant, 
+        std::make_shared<RegexGoParser>(), 
+        std::make_shared<GoModulesRegistry>(), 
+        settings.GetMigrations("Go"), 
+        isDryRun));
         
     handlers.push_back(std::make_shared<NodeHandler>(
-        gitlabClient, aiAssistant, std::make_shared<RegexNpmParser>(), std::make_shared<NpmRegistry>(), 
-        settings.migrations.at("Node")));
+        gitlabClient, 
+        aiAssistant, 
+        std::make_shared<RegexNpmParser>(), 
+        std::make_shared<NpmRegistry>(), 
+        settings.GetMigrations("Node"), 
+        isDryRun));
 
     return handlers;
 }
 
-// --- Main Execution ---
-
 int main(int argc, char* argv[]) {
+    // Bind OS Signals
+    std::signal(SIGINT, HandleSignal);
+    std::signal(SIGTERM, HandleSignal);
+
     LoggerSetup::Initialize("logs");
-
     CliArgs args = ParseCommandLine(argc, argv);
-    AppSettings settings;
 
+    AppSettings settings;
     try {
         settings = AppSettings::Load(args.configPath);
     } catch (const std::exception& e) {
@@ -142,7 +172,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Initialize Clients
     std::shared_ptr<IGitLabClient> gitlabClient = std::make_shared<GitLabRestClient>(settings.gitlabHost, settings.gitlabToken);
     std::shared_ptr<INotificationClient> chatNotifier = std::make_shared<GoogleChatNotifier>(settings.googleChatWebhook);
     
@@ -154,10 +183,9 @@ int main(int argc, char* argv[]) {
     }
 
     auto aiAssistant = BuildAiAssistant(settings, args.isOffline);
-    auto handlers = BuildHandlers(gitlabClient, aiAssistant, settings);
-    bool enableDebugOutput = args.isDryRun || args.isDebug;
+    auto handlers = BuildHandlers(gitlabClient, aiAssistant, settings, args.isDryRun);
 
-    DependencyUpdateOrchestrator orchestrator(gitlabClient, handlers, settings.target, chatNotifier, enableDebugOutput);
+    DependencyUpdateOrchestrator orchestrator(gitlabClient, handlers, settings, chatNotifier, args.isDryRun);
 
     try {
         spdlog::info("Starting Dependency Updater...");
@@ -165,6 +193,7 @@ int main(int argc, char* argv[]) {
         spdlog::info("Workflow completed successfully.");
     } catch (const std::exception& e) {
         spdlog::critical("Workflow failed with exception: {}", e.what());
+        GitManager::CleanupAllWorkspaces(); // Catch-all safety net
         return 1;
     }
 

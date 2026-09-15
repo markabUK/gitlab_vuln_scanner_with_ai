@@ -1,5 +1,4 @@
 #pragma once
-
 #include "Models.hpp"
 #include <memory>
 #include <optional>
@@ -50,9 +49,7 @@ public:
     virtual std::vector<std::string> GetSourceFiles(const std::string& projectId, const std::string& ref, const std::vector<std::string>& extensions) = 0;
     virtual void CreateBranch(const std::string& projectId, const std::string& newBranch, const std::string& refBranch) = 0;
     virtual std::vector<MergeRequest> GetOpenMergeRequests(const std::string& projectId) = 0;
-    
     virtual std::vector<Commit> GetMergeRequestCommits(const std::string& projectId, const std::string& mrIid) = 0;
-    
     virtual void CloseMergeRequest(const std::string& projectId, const std::string& mrIid) = 0;
     virtual void DeleteBranch(const std::string& projectId, const std::string& branchName) = 0;
     virtual void CommitFile(const std::string& projectId, const std::string& branch, const std::string& filePath, const std::string& content, const std::string& commitMessage) = 0;
@@ -148,8 +145,7 @@ public:
     virtual ~IEcosystemHandler() = default;
     virtual std::string GetEcosystemName() const = 0;
     virtual std::vector<std::string> GetTargetExtensions() const = 0;
-    
-    virtual void Process(const ProjectContext& project, const std::vector<std::string>& repoFiles) = 0;
+    virtual std::string Process(const ProjectContext& project, const std::string& localRepoPath, const std::string& branchName) = 0;
     virtual std::map<std::string, std::string> GenerateLockfiles(const std::map<std::string, std::string>& modifiedBuildFiles) const = 0;
 };
 

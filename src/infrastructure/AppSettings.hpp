@@ -48,6 +48,14 @@ public:
     
     std::map<std::string, std::vector<DependencyMigration>> migrations;
 
+    std::vector<DependencyMigration> GetMigrations(const std::string& ecosystem) const {
+        auto it = migrations.find(ecosystem);
+        if (it != migrations.end()) {
+            return it->second;
+        }
+        return {}; 
+    }
+
     static AppSettings Load(const std::string& configPath) {
         if (!std::filesystem::exists(configPath)) {
             throw std::runtime_error("Configuration file not found: " + configPath);
@@ -85,6 +93,7 @@ private:
         settings.ollamaEndpoint = aiJson.value("OllamaEndpoint", "http://localhost:11434/api/generate");
         settings.ollamaModel = aiJson.value("OllamaModel", "qwen2.5-coder:7b");
         settings.ollamaContextLength = aiJson.value("OllamaContextLength", 32768);
+        settings.ollamaOutputLength = aiJson.value("OllamaOutputLength", 16384);
     }
 
     static void ParseNotifications(const json& j, AppSettings& settings) {

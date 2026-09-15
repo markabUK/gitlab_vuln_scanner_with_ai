@@ -51,6 +51,17 @@ CPMAddPackage(
     GIT_TAG v1.14.1 # Latest stable
 )
 
+# 4. libgit2: For local clones, atomic commits, and pushes
+CPMAddPackage(
+    NAME libgit2
+    GITHUB_REPOSITORY libgit2/libgit2
+    VERSION 1.8.1
+    OPTIONS
+        "BUILD_SHARED_LIBS OFF"
+        "BUILD_TESTS OFF"
+        "BUILD_CLI OFF"
+)
+
 # ---------------------------------------------------------------------------
 # Executable & Include Target
 # ---------------------------------------------------------------------------
@@ -66,4 +77,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     nlohmann_json::nlohmann_json
     cpr::cpr
     spdlog::spdlog
+    git2
 )
