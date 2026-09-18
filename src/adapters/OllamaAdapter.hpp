@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <string>
+#include <sstream> // Required for std::istringstream
 
 using json = nlohmann::json;
 
@@ -34,7 +35,6 @@ public:
 
         std::map<std::string, std::string> headers = {{"Content-Type", "application/json"}};
 
-        // Passed lambda no longer takes `isRetry`
         return AiRetryStrategy::Execute(3, 1000, request.originalCode, [&](int attempt) {
             std::string userPrompt = "RELEASE NOTES:\n" + request.changeDetails.releaseNotes + "\n\n";
             if (!request.customPromptContext.empty()) {
@@ -49,22 +49,38 @@ public:
                     {{"role", "system"}, {"content", systemInstructions}},
                     {{"role", "user"}, {"content", userPrompt}}
                 })},
-                {"stream", false},
+                {"stream", true}, // Set to true to prevent idle timeouts
                 {"options", { 
                     {"temperature", 0.1}, 
-                    {"repeat_penalty", 1.15}, 
+                    {"repeat_penalty", 1.0}, 
+                    {"presence_penalty", 0.0},
                     {"num_ctx", contextLength},
                     {"num_predict", maxTokens}
-                }
-                }
+                }}
             };
 
             spdlog::debug("[Ollama] Sending payload to model: {} (Attempt {})", model, attempt);
             auto res = HttpClient::Post(endpoint, payload.dump(), headers);
 
             if (res.statusCode == 200) {
-                auto data = json::parse(res.body);
-                return data["message"]["content"].get<std::string>();
+                std::string fullResponse = "";
+                std::istringstream stream(res.body);
+                std::string line;
+
+                // Parse the Newline Delimited JSON stream
+                while (std::getline(stream, line)) {
+                    if (line.empty()) continue;
+                    try {
+                        auto chunk = json::parse(line);
+                        if (chunk.contains("message") && chunk["message"].contains("content")) {
+                            // Reassemble the tokens into a single string
+                            fullResponse += chunk["message"]["content"].get<std::string>();
+                        }
+                    } catch (const json::parse_error& e) {
+                        spdlog::warn("[Ollama] Failed to parse stream chunk: {} - Error: {}", line, e.what());
+                    }
+                }
+                return fullResponse;
             }
             
             spdlog::error("[Ollama] API failure. Status: {} - Body: {}", res.statusCode, res.body);

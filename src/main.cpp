@@ -89,7 +89,15 @@ std::shared_ptr<CompositeRegistry> BuildMavenRegistry(const AppSettings& setting
 }
 
 std::shared_ptr<IAICodeAssistant> BuildAiAssistant(const AppSettings& settings, bool isDryRunOffline) {
-    if (isDryRunOffline) return std::make_shared<DryRunAICodeAssistant>();
+    std::string provider = settings.aiProvider;
+    std::transform(provider.begin(), provider.end(), provider.begin(), ::toupper);
+
+    if (isDryRunOffline || provider == "NONE") {
+        if (provider == "NONE") {
+            spdlog::info("AI Provider set to 'NONE'. AI refactoring is bypassed.");
+        }
+        return std::make_shared<DryRunAICodeAssistant>();
+    }
     
     if (settings.aiProvider == "OPENAI") return std::make_shared<OpenAIAdapter>(settings.openAiApiKey);
     if (settings.aiProvider == "DUO") return std::make_shared<GitLabDuoAdapter>(settings.gitlabHost, settings.gitlabToken);
